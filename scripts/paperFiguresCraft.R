@@ -12,7 +12,11 @@ library("FactoMineR")
 library("factoextra")
 library(ggtext)
 library(scales) 
+library(grid)
+library(ggridges)
 
+library(ape)
+library(prabclus)
 
 #For the cochran trend test
 library(DescTools)
@@ -30,754 +34,6 @@ library(PerformanceAnalytics)
 
 #library(beer)
 
-#######
-#Perhaps there are people who are more enriched for certain type of pathogens and thus have immune frequencies attuned towards combating those?
-#######
-
-#Surely its the current location that matters? That will determine what pathogens they've been exposed to
-
-setwd("C:/Users/rflaidlaw/Documents/CapTan/AnalysisV2/PhIPseq/")
-
-microbiomePaperResUrbanization <- read.delim("C:/Users/rflaidlaw/Downloads/media-5.csv")
-
-firstup <- function(x) {
-  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
-  x
-}
-
-area_palette <- c("Rural Senegalese" = "#e59f01", "Urban Senegalese" = "#54b3e8", "Urban Dutch" = "#009e72")
-areaComplex_palette <- c("Rural Senegalese" = "#e59f01", "Semi-Urban Senegalese" = "#9a5b90" ,"Urban Senegalese" = "#54b3e8", "Urban Dutch" = "#009e72")
-direction_palette <- c("RUR SEN" = "#e59f01", "URB NLD" = "#009e72")
-
-metaData <- as.data.frame(read.csv("phipseq_metadata.csv"))
-row.names(metaData) <- metaData$ID
-
-metaData_complex <- as.data.frame(read.csv("phipseq_metadata_extended.csv", row.names = 1))
-row.names(metaData_complex) <- metaData_complex$ID
-
-#Make age groupings
-#0-17, 18-29, 30-45, 46+
-
-# phipSeq_FC <- read.csv("res_foldchange_annotated.csv", row.names = 2)
-phipSeq_count <- read.csv("res_counts_annotated.csv", row.names = 2)
-sampleNames <- colnames(phipSeq_count)[8:ncol(phipSeq_count)]
-phipSeq_count <- t(as.matrix( phipSeq_count[, sampleNames]) )
-#Change the column names to reflect the metaData
-row.names(phipSeq_count) <- unlist(str_split( row.names(phipSeq_count), "_" ))[c(FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE)]
-
-phipSeq_p <- read.csv("res_padj_annotated.csv", row.names = 2)
-
-peptideInfo <- read.csv("PhIPseq_peptideInfo_processed_BLAST.csv", row.names = 1)
-
-phipSeq_p <- read.csv("data/individualAll_epitope_binary.csv", row.names = 1)
-phipSeq_p_freq_residence <- read.csv("data/residenceAll_epitope_percentage.csv", row.names = 1)
-phipSeq_p_freq_sex <- read.csv("data/sexSenegal_epitope_percentage.csv", row.names = 1)
-phipSeq_p_freq_sexResidence <- read.csv("data/sexResidenceAll_epitope_percentage.csv", row.names = 1)
-phipSeq_p_pathogenTotal <- read.csv("data/pathogenEpitopeTotals.csv", row.names = 1)
-
-senegalIndividuals <- metaData[str_detect(metaData$Residence, "enegal"),"ID"]
-
-#Number of organisms
-length(unique(peptideInfo$Pathogen))
-
-#### Filter features old ####
-
-phipSeq_p_df <- as.data.frame(phipSeq_p)
-
-phipSeq_p_df$Residence <- metaData[row.names(phipSeq_p_df), "Residence"]
-phipSeq_p_df$Sex <- metaData[row.names(phipSeq_p_df), "Sex"]
-phipSeq_p_df$SexResidence <- paste0(phipSeq_p_df$Sex, "_", phipSeq_p_df$Residence)
-
-epitopeByResidence <- phipSeq_p_df[, -which(colnames(phipSeq_p_df) %in% c("Sex", "SexResidence"))]  %>%
-  dplyr::group_by(Residence) %>%
-  summarise(across(everything(), ~ sum(.x)))
-
-epitopeByResidence <- as.data.frame(epitopeByResidence)
-
-row.names(epitopeByResidence) <- epitopeByResidence$Residence
-epitopeByResidence$Residence <- NULL
-
-epitopeByResidence["Rural Senegalese",] <- (epitopeByResidence["Rural Senegalese",] / nrow(subset(metaData, Residence == "Rural Senegalese"))) * 100
-epitopeByResidence["Urban Senegalese",] <- (epitopeByResidence["Urban Senegalese",] / nrow(subset(metaData, Residence == "Urban Senegalese"))) * 100
-epitopeByResidence["Urban Dutch",] <- (epitopeByResidence["Urban Dutch",] / nrow(subset(metaData, Residence == "Urban Dutch"))) * 100
-
-#Create copy for only senegalese
-epitopeByResidenceSenegal <- epitopeByResidence[str_detect(row.names(epitopeByResidence), "enegal"),]
-
-#This code is quite convoluted, but it basically just finds what epitopes are present in 25% of individuals in at least one residence group
-epitopeByResidence <- (epitopeByResidence + 0.000000000000000000000000000001) / 25
-epitopeByResidence <- log(epitopeByResidence)
-epitopeByResidence <- sign(epitopeByResidence)
-epitopeByResidence <- colSums(epitopeByResidence)
-epitopeByResidence <- epitopeByResidence[epitopeByResidence !=-3 ]
-
-
-epitopeByResidenceSenegal <- (epitopeByResidenceSenegal + 0.000000000000000000000000000001) / 25
-epitopeByResidenceSenegal <- log(epitopeByResidenceSenegal)
-epitopeByResidenceSenegal <- sign(epitopeByResidenceSenegal)
-epitopeByResidenceSenegal <- colSums(epitopeByResidenceSenegal)
-epitopeByResidenceSenegal <- epitopeByResidenceSenegal[epitopeByResidenceSenegal != -2]
-
-#Do the same but for Sex
-epitopeBySexSenegal <- phipSeq_p_df[senegalIndividuals, -which(colnames(phipSeq_p_df) %in% c("Residence", "SexResidence"))  ] %>%
-  dplyr::select(contains( c("agilent","twist","coron","Sex") )) %>%
-  dplyr::group_by(Sex) %>%
-  summarise(across(everything(), ~ sum(.x)))
-
-epitopeBySexSenegal <- as.data.frame(epitopeBySexSenegal)
-
-row.names(epitopeBySexSenegal) <- epitopeBySexSenegal$Sex
-epitopeBySexSenegal$Sex <- NULL
-
-epitopeBySexSenegal["M",] <- (epitopeBySexSenegal["M",] / nrow(subset(metaData, Residence != "Urban Dutch" & Sex == "M"))) * 100
-epitopeBySexSenegal["F",] <- (epitopeBySexSenegal["F",] / nrow(subset(metaData, Residence != "Urban Dutch"& Sex == "F"))) * 100
-
-epitopeBySexSenegal <- (epitopeBySexSenegal + 0.000000000000000000000000000001) / 25
-epitopeBySexSenegal <- log(epitopeBySexSenegal)
-epitopeBySexSenegal <- sign(epitopeBySexSenegal)
-epitopeBySexSenegal <- colSums(epitopeBySexSenegal)
-epitopeBySexSenegal <- epitopeBySexSenegal[epitopeBySexSenegal != -2]
-
-#Finally, for combination of sex and residence
-epitopeBySexResidence <- phipSeq_p_df[, -which(colnames(phipSeq_p_df) %in% c("Residence", "Sex"))  ]  %>%
-  dplyr::group_by(SexResidence) %>%
-  summarise(across(everything(), ~ sum(.x)))
-
-epitopeBySexResidence <- as.data.frame(epitopeBySexResidence)
-
-row.names(epitopeBySexResidence) <- epitopeBySexResidence$SexResidence
-epitopeBySexResidence$SexResidence <- NULL
-
-epitopeBySexResidence["F_Rural Senegalese",] <- (epitopeBySexResidence["F_Rural Senegalese",] / nrow(subset(metaData, Residence == "Rural Senegalese" & Sex == "F"))) * 100
-epitopeBySexResidence["M_Rural Senegalese",] <- (epitopeBySexResidence["M_Rural Senegalese",] / nrow(subset(metaData, Residence == "Rural Senegalese" & Sex == "M"))) * 100
-
-epitopeBySexResidence["F_Urban Senegalese",] <- (epitopeBySexResidence["F_Urban Senegalese",] / nrow(subset(metaData, Residence == "Urban Senegalese" & Sex == "F"))) * 100
-epitopeBySexResidence["M_Urban Senegalese",] <- (epitopeBySexResidence["M_Urban Senegalese",] / nrow(subset(metaData, Residence == "Urban Senegalese" & Sex == "M"))) * 100
-
-epitopeBySexResidence["F_Urban Dutch",] <- (epitopeBySexResidence["F_Urban Dutch",] / nrow(subset(metaData, Residence == "Urban Dutch" & Sex == "F"))) * 100
-epitopeBySexResidence["M_Urban Dutch",] <- (epitopeBySexResidence["M_Urban Dutch",] / nrow(subset(metaData, Residence == "Urban Dutch" & Sex == "M"))) * 100
-
-#As we are dealing with smaller groups, i'm making the percentage threshold higher
-epitopeBySexResidence <- (epitopeBySexResidence + 0.000000000000000000000000000001) / 35
-epitopeBySexResidence <- log(epitopeBySexResidence)
-epitopeBySexResidence <- sign(epitopeBySexResidence)
-epitopeBySexResidence <- colSums(epitopeBySexResidence)
-epitopeBySexResidence <- epitopeBySexResidence[epitopeBySexResidence != -6]
-
-#Find ones specific for rural and urban senegalese
-epitopeBySexRuralSen <- subset(phipSeq_p_df, Residence == "Rural Senegalese")[, -which(colnames(phipSeq_p_df) %in% c("Residence", "Sex"))  ]  %>%
-  dplyr::group_by(SexResidence) %>%
-  summarise(across(everything(), ~ sum(.x)))
-
-epitopeBySexRuralSen <- as.data.frame(epitopeBySexRuralSen)
-
-row.names(epitopeBySexRuralSen) <- epitopeBySexRuralSen$SexResidence
-epitopeBySexRuralSen$SexResidence <- NULL
-
-epitopeBySexRuralSen["F_Rural Senegalese",] <- (epitopeBySexRuralSen["F_Rural Senegalese",] / nrow(subset(metaData, Residence == "Rural Senegalese" & Sex == "F"))) * 100
-epitopeBySexRuralSen["M_Rural Senegalese",] <- (epitopeBySexRuralSen["M_Rural Senegalese",] / nrow(subset(metaData, Residence == "Rural Senegalese" & Sex == "M"))) * 100
-
-#As we are dealing with smaller groups, i'm making the percentage threshold higher
-epitopeBySexRuralSen <- (epitopeBySexRuralSen + 0.000000000000000000000000000001) / 35
-epitopeBySexRuralSen <- log(epitopeBySexRuralSen)
-epitopeBySexRuralSen <- sign(epitopeBySexRuralSen)
-epitopeBySexRuralSen <- colSums(epitopeBySexRuralSen)
-epitopeBySexRuralSen <- epitopeBySexRuralSen[epitopeBySexRuralSen != -2]
-
-epitopeBySexUrbanSen <- subset(phipSeq_p_df, Residence == "Urban Senegalese")[, -which(colnames(phipSeq_p_df) %in% c("Residence", "Sex"))  ]  %>%
-  dplyr::group_by(SexResidence) %>%
-  summarise(across(everything(), ~ sum(.x)))
-
-epitopeBySexUrbanSen <- as.data.frame(epitopeBySexUrbanSen)
-
-row.names(epitopeBySexUrbanSen) <- epitopeBySexUrbanSen$SexResidence
-epitopeBySexUrbanSen$SexResidence <- NULL
-
-epitopeBySexUrbanSen["F_Urban Senegalese",] <- (epitopeBySexUrbanSen["F_Urban Senegalese",] / nrow(subset(metaData, Residence == "Urban Senegalese" & Sex == "F"))) * 100
-epitopeBySexUrbanSen["M_Urban Senegalese",] <- (epitopeBySexUrbanSen["M_Urban Senegalese",] / nrow(subset(metaData, Residence == "Urban Senegalese" & Sex == "M"))) * 100
-
-#As we are dealing with smaller groups, i'm making the percentage threshold higher
-epitopeBySexUrbanSen <- (epitopeBySexUrbanSen + 0.000000000000000000000000000001) / 35
-epitopeBySexUrbanSen <- log(epitopeBySexUrbanSen)
-epitopeBySexUrbanSen <- sign(epitopeBySexUrbanSen)
-epitopeBySexUrbanSen <- colSums(epitopeBySexUrbanSen)
-epitopeBySexUrbanSen <- epitopeBySexUrbanSen[epitopeBySexUrbanSen != -2]
-
-
-#### Define objects ####
-
-phipSeq_p_raw_df <- phipSeq_p
-phipSeq_p_freq_residence_raw_df <- phipSeq_p_freq_residence
-phipSeq_p_freq_sex_raw_df <- phipSeq_p_freq_sex
-phipSeq_p_freq_sexResidence_raw_df <- phipSeq_p_freq_sexResidence
-
-phipSeq_p_raw <- as.matrix(phipSeq_p)
-phipSeq_p_freq_residence_raw <- as.matrix(phipSeq_p_freq_residence)
-phipSeq_p_freq_sex_raw <- as.matrix(phipSeq_p_freq_sex)
-phipSeq_p_freq_sexResidence_raw <- as.matrix(phipSeq_p_freq_sexResidence)
-
-phipSeq_p_df <- phipSeq_p_raw_df[,names(epitopeByResidence)]
-phipSeq_p_freq_residence_df <- phipSeq_p_freq_residence_raw_df[,names(epitopeByResidence)]
-phipSeq_p_freq_sex_df <- phipSeq_p_freq_sex_raw_df[,names(epitopeByResidence)]
-phipSeq_p_freq_sexResidence_df <- phipSeq_p_freq_sexResidence_raw_df[,names(epitopeByResidence)]
-
-phipSeq_p <- as.matrix(phipSeq_p_df)
-phipSeq_p_freq_residence <- as.matrix(phipSeq_p_freq_residence_df)
-phipSeq_p_freq_sex <- as.matrix(phipSeq_p_freq_sex_df)
-phipSeq_p_freq_sexResidence <- as.matrix(phipSeq_p_freq_sexResidence_df)
-
-#### Investigate the epitopes ####
-
-#Look at the epitopes and categorise based on how many individuals they are present in
-#Bins: 1, 2-3, 4-9, 10-24, 25-49, 50+
-
-epitopeCount <- colSums(phipSeq_p_raw)
-
-head(sort(epitopeCount, decreasing = T))
-
-epitopeCountGrouping_key <- c("0" = "1", "1" = "2-3", "2" = "4-9", "3" = "10-24", "4" = "25-49", "5" = "50+")
-
-epitopeCount_groups <- epitopeCount
-
-epitopeCount_groups[epitopeCount <= 1] <- 0
-epitopeCount_groups[epitopeCount >=2 & epitopeCount <= 3] <- 1
-epitopeCount_groups[epitopeCount >=4 & epitopeCount <= 9] <- 2
-epitopeCount_groups[epitopeCount >=10 & epitopeCount <= 24] <- 3
-epitopeCount_groups[epitopeCount >=25 & epitopeCount <=49 ] <- 4
-epitopeCount_groups[epitopeCount >=50 ] <- 5
-
-epitopeCount_groups <- as.character(epitopeCount_groups)
-
-epitopeCount_groups <- epitopeCountGrouping_key[epitopeCount_groups]
-
-plotDF <- data.frame(table(epitopeCount_groups))
-
-plotDF$epitopeCount_groups <- factor(plotDF$epitopeCount_groups,
-                                     levels = c("1", "2-3","4-9", "10-24", "25-49", "50+"))
-
-ggOut <- ggplot(plotDF, aes(x = epitopeCount_groups, y = Freq, fill = epitopeCount_groups)) +
-  geom_bar(stat="identity") +
-  theme_minimal() +
-  xlab("No. individuals in which anti-epitope is present") +
-  ylab("Number of anti-epitopes") 
-ggOut
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/epitopeCountGrouping.pdf", plot = ggOut, 
-       width =12, height = 8)
-
-plotDF <- data.frame("epitopeCount" = epitopeCount)
-ggOut <- ggplot(plotDF, aes(x = epitopeCount)) +
-  geom_histogram() +
-  theme_minimal() +
-  xlab("No. individuals in which anti-epitope is present") + 
-  ylab("No. of significant anti-epitopes (log10)")+
-  scale_y_log10(guide = "axis_logticks")
-ggOut
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/epitopeCount_histogram.pdf", plot = ggOut, 
-       width =9, height = 8)
-
-# #Save as stacked barplot instead (use percentages)
-# plotDF$percentage <- plotDF$Freq
-# plotDF$percentage <- (plotDF$percentage / sum(plotDF$Freq)) * 100
-# 
-# ggOut <- ggplot(plotDF, aes(x = "hi", y = percentage, fill = epitopeCount_groups)) +
-#   geom_bar(stat="identity", position = "stack") +
-#   theme_minimal() +
-#   xlab("") +
-#   ylab("Percentage ")
-# ggOut
-# ggsave(plot = ggOut, filename = "plots/figure_components/epitopePercentGrouping.pdf")
-
-#Five peptides are present in 61/62 individuals (the highest amount):
-#agilent_133222 - staphylococcal protein A (Ig binding protein), Staphylococcus aureus
-#agilent_236864 - staphylococcal protein A (Ig binding protein), Staphylococcus aureus
-#agilent_560 - Pneumococcal histidine triad protein D, Streptococcus pneumoniae
-#agilent_7538 - pneumococcal histidine triad protein E & hydrolase & HIT family hydrolase, Streptococcus pneumoniae
-#twist_47588 - Attachment glycoprotein, Human respiratory syncytial virus
-
-mostCommonEpitopes <- c("agilent_133222", "agilent_236864", "agilent_560", "agilent_7538", "twist_47588")
-
-#Look at the epitopes that are present in 50 and more individuals
-mostPrevalentEpitopes <- epitopeCount[epitopeCount >=50]
-
-#look at the rarest epitopes
-mostRareEpitopes <- epitopeCount[epitopeCount ==1]
-
-
-#Word cloud the most frequent and rarest epitopes
-commonEpitopes <- table(peptideInfo[names(mostPrevalentEpitopes), "Pathogen"])
-rareEpitopes <- table(peptideInfo[names(mostRareEpitopes), "Pathogen"])
-
-#Normalise for how many times an epitope of that organism is present in the dataset
-pathogenTotals <- table(peptideInfo$Pathogen)
-
-#If a pathogen is only present 2 or fewer times, don't investigate it
-keepPathogen <- pathogenTotals[pathogenTotals > 2]
-
-commonEpitopes <- commonEpitopes / pathogenTotals[names(commonEpitopes)]
-rareEpitopes <- rareEpitopes / pathogenTotals[names(rareEpitopes)]
-
-commonEpitopes <- commonEpitopes[intersect(names(keepPathogen), names(commonEpitopes))]
-
-wordcloud2(commonEpitopes, size = 0.2)
-
-
-wordcloud2(rareEpitopes, size = 0.8)
-
-
-rm(plotDF)
-rm(epitopeCount_groups)
-rm(epitopeCount)
-rm(epitopeCountGrouping_key)
-rm(rareEpitopes)
-rm(commonEpitopes)
-rm(keepPathogen)
-rm(pathogenTotals)
-rm(mostRareEpitopes)
-gc()
-
-#### Get normalised total epitopes for different pathogens ####
-
-#row names are individual's ID.
-#columns are total epitope count followed by the normalised epitope count for certain pathogens
-
-normTotalEpitope_DF <- data.frame(epitopeTotals = rowSums(phipSeq_p_raw[metaData$ID,]),
-                                  row.names = metaData$ID)
-
-pathogens <- c("shigella flexneri", "rhinovirus b", "human adenovirus", "epstein-barr virus",
-               "homo sapiens", "aureus", "streptococcus pneumoniae", "streptococcus pyogenes",
-               "human respiratory syncytial virus", "barnesiella intestinihominis", "gammaherpesvirus 8",
-               "plasmodium reichenowi", "human cytomegalovirus")
-
-pathogens <- unique(peptideInfo$Pathogen)
-
-for(i in pathogens){
-  
-  peptideInfoCurrent <- peptideInfo[peptideInfo$Pathogen == i,]
-  
-  currentEpitopes <- row.names(peptideInfoCurrent)
-  
-  
-  
-  #Add current epitopes bound to data frame
-  if(length(currentEpitopes)==1){
-    currentEpitopesTotals <- phipSeq_p_raw[,currentEpitopes]
-    
-  }
-  
-  
-  else{
-    currentEpitopesTotals <- rowSums(phipSeq_p_raw[,currentEpitopes])
-    
-  }
-  
-  #Sort name 
-  i <- str_replace_all(i, "-| |\\/", "")
-  
-  normTotalEpitope_DF[[paste0(i, "TotalNorm")]] <- currentEpitopesTotals[row.names(normTotalEpitope_DF)] / normTotalEpitope_DF$epitopeTotals
-  
-}
-
-normTotalEpitope_DF$Residence <- metaData[row.names(normTotalEpitope_DF), "Residence"]
-normTotalEpitope_DF$Residence <- factor(normTotalEpitope_DF$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
-normTotalEpitope_DF$Donor <- row.names(normTotalEpitope_DF)
-
-test_normTotal <- normTotalEpitope_DF
-test_normTotal <- test_normTotal[,str_detect(colnames(test_normTotal), "TotalNorm")]
-
-rowSums(test_normTotal)
-#### Get normalised total epitopes for different proteins ####
-
-#row names are individual's ID.
-#columns are total epitope count followed by the normalised epitope count for certain pathogens
-
-normTotalEpitope_DF_protein <- data.frame(epitopeTotals = rowSums(phipSeq_p_raw[metaData$ID,]),
-                                  row.names = metaData$ID)
-
-peptideInfo$protein_pathogen <- peptideInfo$epitopeGroup
-
-peptideInfo$protein_pathogen <- str_replace_all(peptideInfo$protein_pathogen, "-| ", "")
-
-proteins <- unique(peptideInfo$protein_pathogen)
-
-for(i in proteins){
-  
-  peptideInfoCurrent <- peptideInfo[peptideInfo$protein_pathogen == i,]
-  
-  currentEpitopes <- row.names(peptideInfoCurrent)
-  
-  #Add current epitopes bound to data frame
-  if(length(currentEpitopes)==1){
-    currentEpitopesTotals <- phipSeq_p_raw[,currentEpitopes]
-    
-  }
-  
-  
-  else{
-    currentEpitopesTotals <- rowSums(phipSeq_p_raw[,currentEpitopes])
-    
-  }
-  
-  normTotalEpitope_DF_protein[[paste0(i, "TotalNorm")]] <- currentEpitopesTotals[row.names(normTotalEpitope_DF_protein)] / normTotalEpitope_DF_protein$epitopeTotals
-  
-}
-
-normTotalEpitope_DF_protein$Residence <- metaData[row.names(normTotalEpitope_DF_protein), "Residence"]
-normTotalEpitope_DF_protein$Residence <- factor(normTotalEpitope_DF_protein$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
-normTotalEpitope_DF_protein$Donor <- row.names(normTotalEpitope_DF_protein)
-
-test_normTotal <- normTotalEpitope_DF_protein
-test_normTotal <- test_normTotal[,str_detect(colnames(test_normTotal), "TotalNorm")]
-
-rowSums(test_normTotal)
-
-#### Investigate rural, urban and dutch: group level antibody detected ####
-
-# epitopeDetectedGroup <- phipSeq_p_raw_df
-# 
-# epitopeDetectedGroup$Residence <- metaData[row.names(epitopeDetectedGroup), "Residence"]
-# 
-# #iterate three times and select different samples of rural and urban senegalese of equal size to urban dutch
-# sampleSize <- sum(str_detect(epitopeDetectedGroup$Residence, "utch"))
-# 
-# 
-# # epitopeDetectedGroup <- epitopeDetectedGroup %>%
-# #                                 group_by(Residence) %>%
-# #                                 summarise(across(everything(), sum))
-# 
-# inputList <- list()
-# 
-# for(i in c(42, 64, 1)){
-#   
-#   set.seed(i)
-#   
-#   ruralSenegal <- subset(epitopeDetectedGroup, Residence == "Rural Senegalese")
-#   ruralSenegal <- ruralSenegal[sample(row.names(ruralSenegal), size = sampleSize),]
-#   
-#   urbanSenegal <- subset(epitopeDetectedGroup, Residence == "Urban Senegalese")
-#   urbanSenegal <- urbanSenegal[sample(row.names(urbanSenegal), size = sampleSize),]
-#   
-#   urbanDutch <- subset(epitopeDetectedGroup, Residence == "Urban Dutch")
-#   
-#   currentCombination <- rbind(ruralSenegal, urbanSenegal)
-#   currentCombination <- rbind(currentCombination, urbanDutch)
-#   
-#   inputList[[as.character(i)]] <- currentCombination
-#   
-#   currentDetected <- currentCombination %>%
-#                                   group_by(Residence) %>%
-#                                   summarise(across(everything(), sum))
-#   currentDetected$total <- rep(sampleSize, 3)
-#   
-#   currentDetected <- as.data.frame(currentDetected)
-#   
-#   row.names(currentDetected) <- currentDetected$Residence
-#   currentDetected$Residence <- NULL
-#   
-#   plotDF <- data.frame(Residence = row.names(currentDetected),
-#                        total = ncol(currentDetected))
-#   
-#   epitopeCounts <- rowSums(currentDetected)
-#   plotDF$count <- epitopeCounts[plotDF$Residence]
-#   plotDF$percent <- (plotDF$count / plotDF$total ) * 100
-#   
-#   plotDF$Residence <- factor(plotDF$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
-#   
-#   print(ggplot(plotDF, aes(x = Residence, y = percent, fill = Residence)) +
-#           geom_bar(stat = "identity") +
-#           ylim(0,100) +
-#           scale_fill_manual(values = area_palette)
-#   )
-#   
-#   
-# }
-
-
-#### Investigate rural, urban and dutch: PCA and cochran-armitage test (epitope presence/absence as input) ####
-
-#Get the number of different organisms bound for each individual
-diffOrganisms <- reshape2::melt(phipSeq_p_raw)
-diffOrganisms$Pathogen <- peptideInfo[as.character(diffOrganisms$Var2), "Pathogen"]
-
-diffOrganisms <- subset(diffOrganisms, value == 1)
-
-diffOrganisms <- diffOrganisms %>%
-                    group_by(Var1) %>%
-                  summarise(nOrganisms = length(unique(Pathogen)),
-                            nEpitope = length(Pathogen))
-
-diffOrganisms$Residence <- metaData[as.character(diffOrganisms$Var1), "Residence"]
-diffOrganisms$Residence <- factor(diffOrganisms$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch") )
-
-diffOrganisms$norm_nOrganisms <- diffOrganisms$nOrganisms / diffOrganisms$nEpitope
-
-ggplot(diffOrganisms, aes(x = Residence, y = nOrganisms, fill = Residence)) +
-                          geom_boxplot() +
-                          geom_jitter() +
-                          scale_fill_manual(values = area_palette)
-
-ggplot(diffOrganisms, aes(x = Residence, y = nEpitope, fill = Residence)) +
-  geom_boxplot() +
-  geom_jitter() +
-  scale_fill_manual(values = area_palette)
-
-my_comparisons <- list( c("Rural Senegalese", "Urban Senegalese"), c("Urban Senegalese", "Urban Dutch"), c("Rural Senegalese", "Urban Dutch") )
-ggOut <- ggboxplot(diffOrganisms, x = "Residence", y = "nEpitope",
-          fill = "Residence")+ 
-  stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
-  stat_compare_means(label.y = 50) +
-  scale_fill_manual(values = area_palette) +
-  geom_jitter()
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/nEpitopes_residence_comparison.pdf", plot = ggOut, 
-       width =12, height = 8)
-
-ggplot(diffOrganisms, aes(x = nOrganisms, y = nEpitope, color = Residence)) +
-  geom_point() +
-  geom_jitter() +
-  scale_color_manual(values = area_palette)
-
-ggOut <- ggplot(diffOrganisms, aes(x = "", y = nEpitope)) +
-  geom_boxplot() +
-  geom_jitter() +
-  theme_minimal() +
-  xlab("") +
-  ylab("Number of significant anti-epitopes") 
-ggOut
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/n_sigAntiEpitopes.pdf", plot = ggOut, 
-       width =6, height = 8)
-
-median(diffOrganisms$nEpitope)
-
-#Perform PCA
-
-#Keep RT149
-PCA_phip <- phipSeq_p
-
-#Remove RT149, as they skew the data and epitopes which everyone has
-# PCA_phip <- phipSeq_p[-which(row.names(phipSeq_p) == "RT149"),]
-# PCA_phip <- PCA_phip[,names(colSums(PCA_phip)[colSums(PCA_phip) < nrow(PCA_phip)])]
-
-PCA_phip <- {set.seed(50) ;prcomp(PCA_phip, scale = TRUE, center = TRUE)}
-
-fviz_pca_ind(PCA_phip)
-
-embedPC <- as.data.frame(PCA_phip$x)
-embedPC$Residence <- metaData[row.names(embedPC), "Residence"]
-embedPC$sampleID <- row.names(embedPC)
-embedPC$Sex <- metaData[row.names(embedPC), "Sex"]
-embedPC$Age <- metaData[row.names(embedPC), "Age"]
-embedPC$job_amalgam <- metaData_complex[row.names(embedPC), "job_amalgam"]
-embedPC$Residence_complex <- metaData_complex[row.names(embedPC), "Cur_Res_G"]
-
-#Create age categories
-embedPC$Age_group[embedPC$Age < 26] <- "18-25"
-embedPC$Age_group[embedPC$Age >= 26 & embedPC$Age < 36] <- "26-35"
-embedPC$Age_group[embedPC$Age >= 36] <- "36+"
-
-#What PC correlates best with residence and sex
-embedPC$Residence_numeric <- embedPC$Residence
-embedPC$Residence_numeric[str_detect(embedPC$Residence_numeric, "Rural")] <- "0"
-embedPC$Residence_numeric[str_detect(embedPC$Residence_numeric, "Urban Senegalese")] <- "1"
-embedPC$Residence_numeric[str_detect(embedPC$Residence_numeric, "Dutch")] <- "2"
-embedPC$Residence_numeric <- as.numeric(embedPC$Residence_numeric)
-
-embedPC$Sex_numeric <- embedPC$Sex
-embedPC$Sex_numeric[str_detect(embedPC$Sex_numeric, "M")] <- "0"
-embedPC$Sex_numeric[str_detect(embedPC$Sex_numeric, "F")] <- "1"
-embedPC$Sex_numeric <- as.numeric(embedPC$Sex_numeric)
-
-#PC2 captures urbanization
-embedPC_cor <- cor(as.matrix(embedPC[, -which(colnames(embedPC) %in% c("Sex", "Residence", "sampleID", 
-                                                                       "Age_group", "job_amalgam", "Residence_complex"))]))
-
-#Get loadings of PC2 (top 10 in each direction)
-PC2_loadings <- PCA_phip$rotation[, "PC2"]
-
-PC2_loadings_pos <- PC2_loadings[PC2_loadings > 0]
-PC2_loadings_pos <- PC2_loadings_pos[order(PC2_loadings_pos, decreasing = T)]
-PC2_loadings_pos <- PC2_loadings_pos[1:10]
-
-PC2_loadings_neg <- PC2_loadings[PC2_loadings < 0]
-PC2_loadings_neg <- PC2_loadings_neg[order(PC2_loadings_neg, decreasing = F)]
-PC2_loadings_neg <- PC2_loadings_neg[1:10]
-
-PC2_loadings_df <- data.frame("epitope" = c(names(PC2_loadings_pos), names(PC2_loadings_neg)),
-                              "PC2_loading" = as.numeric( c(PC2_loadings_pos, PC2_loadings_neg) ),
-                              row.names = c(names(PC2_loadings_pos), names(PC2_loadings_neg)) )
-
-PC2_loadings_df$Organism <- firstup(peptideInfo[row.names(PC2_loadings_df), "Pathogen"])
-PC2_loadings_df$Protein <- firstup(peptideInfo[row.names(PC2_loadings_df), "Protein"])
-PC2_loadings_df$Organism_protein <- paste0(PC2_loadings_df$epitope, ": " ,PC2_loadings_df$Protein, " (",PC2_loadings_df$Organism ,")")
-
-PC2_loadings_df$direction <- "Urban Dutch"
-PC2_loadings_df$direction[which(PC2_loadings_df$PC2_loading < 0)] <- "Rural Senegalese"
-
-PC2_loadings_df$epitope <- factor(PC2_loadings_df$epitope, levels = )
-
-PC2_loadings_df <- PC2_loadings_df[order(PC2_loadings_df$PC2_loading),]
-
-
-ggOut <- ggplot(PC2_loadings_df, aes(x  = PC2_loading, y = forcats::fct_inorder(Organism_protein), fill = direction)) +
-        geom_bar(stat = "identity") +
-        scale_fill_manual(values = area_palette) +
-        theme_minimal() +
-        ylab("") +
-        xlab("PC2 loadings")
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/PC2_loadings.pdf", plot = ggOut, 
-       width =15, height = 8)
-
-#Boxplot of PC2 values split by Residence
-PC2_lm <- lm(PC2 ~ Residence, data = embedPC)
-
-PC2_emm <- emmeans(PC2_lm, "Residence")
-trendOutput <- as.data.frame(contrast(PC2_emm, "poly"))
-
-pairwiseOutput <- as.data.frame(pairs(PC2_emm))
-
-group1 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(TRUE, FALSE)]
-group2 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(FALSE, TRUE)]
-
-ggpubr_formatted <- data.frame(".y."= "test", "group1" = group1, "group2" = group2,
-                               p = pairwiseOutput$p.value)
-
-dataMax <- max(embedPC$PC2)
-
-ggpubr_formatted <- ggpubr_formatted %>%
-  mutate(y.position = c( dataMax + (dataMax * 0.1) , dataMax + (dataMax * 0.2), dataMax + (dataMax * 0.3)))
-
-ggpubr_formatted$p.symbol <- gtools::stars.pval(ggpubr_formatted$p)
-ggpubr_formatted$p.symbol[ggpubr_formatted$p >= 0.05] <- "NS"
-
-trendP <- subset(trendOutput, contrast == "linear")$p.value
-if(trendP < 0.05){trendP <- "< 0.05"}else{trendP <- "\u2265 0.05"}
-
-ggOut <- ggboxplot(embedPC, y = "PC2", x = "Residence", fill = "Residence", outlier.shape = NA) +
-  stat_pvalue_manual(ggpubr_formatted, label = "p.symbol") +
-  scale_fill_manual(values = area_palette) +
-  ggtitle(label = paste0("Trend p-value ", trendP)) +
-  ylab("PC2") +
-  xlab("") +
-  geom_jitter() +
-  grids(linetype = "solid")
-ggOut
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/PC2_loadings_boxplot.pdf", plot = ggOut, 
-       width =6, height = 8)
-
-#PC2 and PC6 split sex
-
-#Get variance explained
-PC1_varExplained <- (PCA_phip$sdev[1]^2 / sum(PCA_phip$sdev^2)) * 100
-PC2_varExplained <- (PCA_phip$sdev[2]^2 / sum(PCA_phip$sdev^2)) * 100
-PC3_varExplained <- (PCA_phip$sdev[3]^2 / sum(PCA_phip$sdev^2)) * 100
-
-embedPC$Residence <- factor(embedPC$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
-
-#Correlation of Age and PC2
-cor.test(embedPC$PC2, embedPC$Age, method = "pearson")
-cor.test(embedPC$PC1, embedPC$Age, method = "pearson")
-
-#Save PCA data
-write.csv(embedPC, "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/data/processed/PC_coords.csv")
-
-#PCA plot coloured by Area
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Residence,embedPC,mean),by="Residence")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=5, aes(color=Residence))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Residence)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Residence), size=7, shape = 21) +
-  theme_minimal()+
-  scale_fill_manual(values = area_palette) +
-  scale_color_manual(values = area_palette)+
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)"))
-ggOut
-ggsave(filename = "plots/figure_components/PC1PC2Plot_filteredData_residenceColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/PC1PC2Plot_filteredData_residenceColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-
-#PCA plot coloured by Sex
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Sex,embedPC,mean),by="Sex")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=5, aes(color=Sex))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Sex)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Sex), size=7, shape = 21) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)"))
-ggOut
-ggsave(filename = "plots/figure_components/PC1PC2Plot_filteredData_sexColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/PC1PC2Plot_filteredData_sexColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-
-#PCA plot coloured by Age
-ggOut <- ggplot(embedPC, aes(PC1,PC2, color = Age))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=5) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)")) +
-  scale_color_viridis_b()
-ggOut
-ggsave(filename = "plots/figure_components/PC1PC2Plot_filteredData_ageColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/PC1PC2Plot_filteredData_ageColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-
-#PCA plot coloured by age group
-#18-25, 26-35, 36+
-
-ageGroup_palette <- c("18-25" = "#bea0cc", "26-35" = "#ad68af", "36+" = "#562888")
-
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~job_amalgam,embedPC,mean),by="job_amalgam")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=job_amalgam)) +
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = job_amalgam)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=job_amalgam), size=5, shape = 21) +
-  theme_minimal() + 
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)"))
-ggOut
-ggsave(filename = "plots/figure_components/PC1PC2Plot_filteredData_ageGroupColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/PC1PC2Plot_filteredData_ageGroupColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-
-
-#PCA plot coloured by working environment
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Residence,embedPC,mean),by="Residence")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=Residence))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Residence)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Residence), size=5, shape = 21) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)")) +
-  facet_wrap(~job_amalgam)+
-  scale_fill_manual(values = area_palette) +
-  scale_color_manual(values = area_palette)
-ggOut
-ggsave(filename = "plots/figure_components/PC1PC2Plot_filteredData_residenceColour_splitWorkingEnv.pdf", plot = ggOut, 
-       width = 9, height = 8)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/PC1PC2Plot_filteredData_residenceColour_splitWorkingEnv.pdf", plot = ggOut, 
-       width = 9, height = 8)
-
-#Does the total epitope count correlate with PC1? - Yes!!
-totalEpitopeCount <- rowSums(phipSeq_p)
-
-cor(totalEpitopeCount, embedPC[names(totalEpitopeCount),"PC1"])
-
-
-#Perform pairwise permanova on the different groups
 pairwise_permanova <- function(sp_matrix, group_var, dist = "bray", adj = "fdr", perm = 10000) {
   
   require(vegan)
@@ -819,10 +75,458 @@ pairwise_permanova <- function(sp_matrix, group_var, dist = "bray", adj = "fdr",
   ))
 }
 
-#Residence
-pairwise_permanova(sp_matrix = embedPC[, c("PC1", "PC2")], group_var = embedPC$Residence)
-pairwise_permanova(sp_matrix = embedPC[, c("PC1", "PC2")], group_var = embedPC$Sex)
-pairwise_permanova(sp_matrix = embedPC[, c("PC1", "PC2")], group_var = embedPC$Age_group)
+
+setwd("C:/Users/rflaidlaw/Documents/CapTan/AnalysisV2/PhIPseq/")
+
+firstup <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+area_palette <- c("Rural Senegalese" = "#e59f01", "Urban Senegalese" = "#54b3e8", "Urban Dutch" = "#009e72")
+areaComplex_palette <- c("Rural Senegalese" = "#e59f01", "Semi-Urban Senegalese" = "#9a5b90" ,"Urban Senegalese" = "#54b3e8", "Urban Dutch" = "#009e72")
+direction_palette <- c("RUR SEN" = "#e59f01", "URB NLD" = "#009e72")
+
+metaData <- as.data.frame(read.csv("phipseq_metadata.csv"))
+row.names(metaData) <- metaData$ID
+
+metaData_complex <- as.data.frame(read.csv("phipseq_metadata_extended.csv", row.names = 1))
+row.names(metaData_complex) <- metaData_complex$ID
+
+
+# phipSeq_FC <- read.csv("res_foldchange_annotated.csv", row.names = 2)
+phipSeq_count <- read.csv("res_counts_annotated.csv", row.names = 2)
+sampleNames <- colnames(phipSeq_count)[8:ncol(phipSeq_count)]
+phipSeq_count <- t(as.matrix( phipSeq_count[, sampleNames]) )
+#Change the column names to reflect the metaData
+row.names(phipSeq_count) <- unlist(str_split( row.names(phipSeq_count), "_" ))[c(FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE)]
+
+peptideInfo <- read.csv("PhIPseq_peptideInfo_processed_BLAST.csv", row.names = 1)
+
+phipSeq_p <- read.csv("data/individualAll_epitope_binary.csv", row.names = 1)
+phipSeq_p_freq_residence <- read.csv("data/residenceAll_epitope_percentage.csv", row.names = 1)
+phipSeq_p_freq_sex <- read.csv("data/sexSenegal_epitope_percentage.csv", row.names = 1)
+phipSeq_p_freq_sexResidence <- read.csv("data/sexResidenceAll_epitope_percentage.csv", row.names = 1)
+phipSeq_p_pathogenTotal <- read.csv("data/pathogenEpitopeTotals.csv", row.names = 1)
+
+#### Filter features ####
+
+phipSeq_p_df <- as.data.frame(phipSeq_p)
+
+phipSeq_p_df$Residence <- metaData[row.names(phipSeq_p_df), "Residence"]
+phipSeq_p_df$Sex <- metaData[row.names(phipSeq_p_df), "Sex"]
+phipSeq_p_df$SexResidence <- paste0(phipSeq_p_df$Sex, "_", phipSeq_p_df$Residence)
+
+epitopeByResidence <- phipSeq_p_df[, -which(colnames(phipSeq_p_df) %in% c("Sex", "SexResidence"))]  %>%
+  dplyr::group_by(Residence) %>%
+  summarise(across(everything(), ~ sum(.x)))
+
+epitopeByResidence <- as.data.frame(epitopeByResidence)
+
+row.names(epitopeByResidence) <- epitopeByResidence$Residence
+epitopeByResidence$Residence <- NULL
+
+# #This code is quite convoluted, but it basically just finds what epitopes are present in 25% of individuals in at least one residence group
+# epitopeByResidence["Rural Senegalese",] <- (epitopeByResidence["Rural Senegalese",] / nrow(subset(metaData, Residence == "Rural Senegalese"))) * 100
+# epitopeByResidence["Urban Senegalese",] <- (epitopeByResidence["Urban Senegalese",] / nrow(subset(metaData, Residence == "Urban Senegalese"))) * 100
+# epitopeByResidence["Urban Dutch",] <- (epitopeByResidence["Urban Dutch",] / nrow(subset(metaData, Residence == "Urban Dutch"))) * 100
+# 
+# percentageCutoff <- 25
+# 
+# epitopeByResidence <- (epitopeByResidence + 0.000000000000000000000000000001) / percentageCutoff
+# epitopeByResidence <- log(epitopeByResidence)
+# epitopeByResidence <- sign(epitopeByResidence)
+# epitopeByResidence <- colSums(epitopeByResidence)
+# epitopeByResidence <- epitopeByResidence[epitopeByResidence !=-3 ]
+# 
+# subsetPeptideInfo <- peptideInfo[names(epitopeByResidence),]
+# 
+# dim(subsetPeptideInfo)
+
+#This code keeps epitopes that are found in 4 or more individuals
+epitopeByResidence <- epitopeByResidence / 4
+epitopeByResidence <- log(epitopeByResidence)
+
+#This section rests on log(0) = -Inf
+epitopeByResidence <- sign(epitopeByResidence)
+
+epitopeByResidence <- colSums(epitopeByResidence)
+epitopeByResidence <- epitopeByResidence[epitopeByResidence !=-3 ]
+
+subsetPeptideInfo <- peptideInfo[names(epitopeByResidence),]
+
+dim(subsetPeptideInfo)
+
+#### Define objects ####
+
+#Remove the unknown BLAST epitopes
+known_epitopes <- row.names(subset(peptideInfo, Pathogen != "unknownblast"))
+
+phipSeq_p_raw_df <- phipSeq_p[,known_epitopes]
+phipSeq_p_freq_residence_raw_df <- phipSeq_p_freq_residence
+phipSeq_p_freq_sex_raw_df <- phipSeq_p_freq_sex
+phipSeq_p_freq_sexResidence_raw_df <- phipSeq_p_freq_sexResidence
+
+phipSeq_p_raw <- as.matrix(phipSeq_p[,known_epitopes])
+phipSeq_p_freq_residence_raw <- as.matrix(phipSeq_p_freq_residence)
+phipSeq_p_freq_sex_raw <- as.matrix(phipSeq_p_freq_sex)
+phipSeq_p_freq_sexResidence_raw <- as.matrix(phipSeq_p_freq_sexResidence)
+
+epitopeByResidence <- epitopeByResidence[intersect(known_epitopes, names(epitopeByResidence))]
+
+phipSeq_p_df <- phipSeq_p_raw_df[,names(epitopeByResidence)]
+phipSeq_p_freq_residence_df <- phipSeq_p_freq_residence_raw_df[,names(epitopeByResidence)]
+phipSeq_p_freq_sex_df <- phipSeq_p_freq_sex_raw_df[,names(epitopeByResidence)]
+phipSeq_p_freq_sexResidence_df <- phipSeq_p_freq_sexResidence_raw_df[,names(epitopeByResidence)]
+
+phipSeq_p <- as.matrix(phipSeq_p_df)
+phipSeq_p_freq_residence <- as.matrix(phipSeq_p_freq_residence_df)
+phipSeq_p_freq_sex <- as.matrix(phipSeq_p_freq_sex_df)
+phipSeq_p_freq_sexResidence <- as.matrix(phipSeq_p_freq_sexResidence_df)
+
+peptideInfo <- subset(peptideInfo, Pathogen != "unknownblast")
+
+#### Investigate the epitopes ####
+
+#Look at the epitopes and categorise based on how many individuals they are present in
+#Bins: 1, 2-3, 4-9, 10-24, 25-49, 50+
+
+epitopeCount <- colSums(phipSeq_p_raw)
+
+head(sort(epitopeCount, decreasing = T))
+
+epitopeCountGrouping_key <- c("0" = "1", "1" = "2-3", "2" = "4-9", "3" = "10-24", "4" = "25-49", "5" = "50+")
+
+epitopeCount_groups <- epitopeCount
+
+epitopeCount_groups[epitopeCount <= 1] <- 0
+epitopeCount_groups[epitopeCount >=2 & epitopeCount <= 3] <- 1
+epitopeCount_groups[epitopeCount >=4 & epitopeCount <= 9] <- 2
+epitopeCount_groups[epitopeCount >=10 & epitopeCount <= 24] <- 3
+epitopeCount_groups[epitopeCount >=25 & epitopeCount <=49 ] <- 4
+epitopeCount_groups[epitopeCount >=50 ] <- 5
+
+epitopeCount_groups <- as.character(epitopeCount_groups)
+
+epitopeCount_groups <- epitopeCountGrouping_key[epitopeCount_groups]
+
+plotDF <- data.frame(table(epitopeCount_groups))
+
+plotDF$epitopeCount_groups <- factor(plotDF$epitopeCount_groups,
+                                     levels = c("1", "2-3","4-9", "10-24", "25-49", "50+"))
+
+ggOut <- ggplot(plotDF, aes(x = epitopeCount_groups, y = Freq, fill = epitopeCount_groups)) +
+  geom_bar(stat="identity") +
+  theme_minimal() +
+  xlab("No. individuals in which anti-epitope is present") +
+  ylab("Number of anti-epitopes") 
+ggOut
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/epitopeCountGrouping.pdf", plot = ggOut, 
+       width =12, height = 8)
+
+plotDF <- data.frame("epitopeCount" = epitopeCount)
+ggOut <- ggplot(plotDF, aes(x = epitopeCount)) +
+  geom_histogram() +
+  theme_minimal() +
+  xlab("No. individuals in which anti-epitope is present") + 
+  ylab("No. of significant anti-epitopes (log10)")+
+  scale_y_log10(guide = "axis_logticks")
+ggOut
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/epitopeCount_histogram.pdf", plot = ggOut, 
+       width =9, height = 11)
+
+# #Save as stacked barplot instead (use percentages)
+# plotDF$percentage <- plotDF$Freq
+# plotDF$percentage <- (plotDF$percentage / sum(plotDF$Freq)) * 100
+# 
+# ggOut <- ggplot(plotDF, aes(x = "hi", y = percentage, fill = epitopeCount_groups)) +
+#   geom_bar(stat="identity", position = "stack") +
+#   theme_minimal() +
+#   xlab("") +
+#   ylab("Percentage ")
+# ggOut
+# ggsave(plot = ggOut, filename = "plots/figure_components/epitopePercentGrouping.pdf")
+
+#Five peptides are present in 61/62 individuals (the highest amount):
+#agilent_133222 - staphylococcal protein A (Ig binding protein), Staphylococcus aureus
+#agilent_236864 - staphylococcal protein A (Ig binding protein), Staphylococcus aureus
+#agilent_560 - Pneumococcal histidine triad protein D, Streptococcus pneumoniae
+#agilent_7538 - pneumococcal histidine triad protein E & hydrolase & HIT family hydrolase, Streptococcus pneumoniae
+#twist_47588 - Attachment glycoprotein, Human respiratory syncytial virus
+
+mostCommonEpitopes <- c("agilent_133222", "agilent_236864", "agilent_560", "agilent_7538", "twist_47588")
+
+#Look at the epitopes that are present in 50 and more individuals
+mostPrevalentEpitopes <- epitopeCount[epitopeCount >=50]
+
+#look at the rarest epitopes
+mostRareEpitopes <- epitopeCount[epitopeCount ==1]
+
+
+# #Word cloud the most frequent and rarest epitopes
+# commonEpitopes <- table(peptideInfo[names(mostPrevalentEpitopes), "Pathogen"])
+# rareEpitopes <- table(peptideInfo[names(mostRareEpitopes), "Pathogen"])
+# 
+# #Normalise for how many times an epitope of that organism is present in the dataset
+# pathogenTotals <- table(peptideInfo$Pathogen)
+# 
+# #If a pathogen is only present 2 or fewer times, don't investigate it
+# keepPathogen <- pathogenTotals[pathogenTotals > 2]
+# 
+# commonEpitopes <- commonEpitopes / pathogenTotals[names(commonEpitopes)]
+# rareEpitopes <- rareEpitopes / pathogenTotals[names(rareEpitopes)]
+# 
+# commonEpitopes <- commonEpitopes[intersect(names(keepPathogen), names(commonEpitopes))]
+# 
+# wordcloud2(commonEpitopes, size = 0.2)
+# 
+# 
+# wordcloud2(rareEpitopes, size = 0.8)
+
+
+rm(plotDF)
+rm(epitopeCount_groups)
+rm(epitopeCount)
+rm(epitopeCountGrouping_key)
+rm(rareEpitopes)
+rm(commonEpitopes)
+rm(keepPathogen)
+rm(pathogenTotals)
+rm(mostRareEpitopes)
+gc()
+
+#### Get normalised total epitopes for different pathogens ####
+
+#row names are individual's ID.
+#columns are total epitope count followed by the normalised epitope count for certain pathogens
+
+normTotalEpitope_DF <- data.frame(epitopeTotals = rowSums(phipSeq_p_raw[metaData$ID,]),
+                                  row.names = metaData$ID)
+
+pathogens <- unique(peptideInfo$Pathogen)
+
+for(i in pathogens){
+  
+  peptideInfoCurrent <- peptideInfo[peptideInfo$Pathogen == i,]
+  
+  currentEpitopes <- row.names(peptideInfoCurrent)
+  
+  
+  
+  #Add current epitopes bound to data frame
+  if(length(currentEpitopes)==1){
+    currentEpitopesTotals <- phipSeq_p_raw[,currentEpitopes]
+    
+  }
+  
+  
+  else{
+    currentEpitopesTotals <- rowSums(phipSeq_p_raw[,currentEpitopes])
+    
+  }
+  
+  #Sort name 
+  i <- str_replace_all(i, "-| |\\/", "")
+  
+  normTotalEpitope_DF[[paste0(i, "TotalNorm")]] <- currentEpitopesTotals[row.names(normTotalEpitope_DF)] / normTotalEpitope_DF$epitopeTotals
+  
+}
+
+rowSums(normTotalEpitope_DF[,which(colnames(normTotalEpitope_DF) != "epitopeTotals")])
+
+#Remove organisms which are only detected in 4 or fewer individuals
+organismSum <- colSums(normTotalEpitope_DF > 0)
+organismSum <- organismSum[organismSum >= 4]
+
+normTotalEpitope_DF <- normTotalEpitope_DF[, names(organismSum)]
+
+normTotalEpitope_DF$Residence <- metaData[row.names(normTotalEpitope_DF), "Residence"]
+normTotalEpitope_DF$Residence <- factor(normTotalEpitope_DF$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
+normTotalEpitope_DF$Donor <- row.names(normTotalEpitope_DF)
+
+test_normTotal <- normTotalEpitope_DF
+test_normTotal <- test_normTotal[,str_detect(colnames(test_normTotal), "TotalNorm")]
+
+rowSums(test_normTotal)
+
+#### Look at the total number of epitopes and species found across the groups and individuals ####
+#Get the number of different organisms bound for each individual
+diffOrganisms <- reshape2::melt(phipSeq_p_raw)
+diffOrganisms$Pathogen <- peptideInfo[as.character(diffOrganisms$Var2), "Pathogen"]
+
+diffOrganisms <- subset(diffOrganisms, value == 1)
+
+diffOrganisms <- diffOrganisms %>%
+                    group_by(Var1) %>%
+                  summarise(nOrganisms = length(unique(Pathogen)),
+                            nEpitope = length(Pathogen))
+
+diffOrganisms$Residence <- metaData[as.character(diffOrganisms$Var1), "Residence"]
+diffOrganisms$Residence <- factor(diffOrganisms$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch") )
+
+diffOrganisms$norm_nOrganisms <- diffOrganisms$nOrganisms / diffOrganisms$nEpitope
+
+ggplot(diffOrganisms, aes(x = Residence, y = nOrganisms, fill = Residence)) +
+                          geom_boxplot() +
+                          geom_jitter() +
+                          scale_fill_manual(values = area_palette)
+
+ggplot(diffOrganisms, aes(x = Residence, y = nEpitope, fill = Residence)) +
+  geom_boxplot() +
+  geom_jitter() +
+  scale_fill_manual(values = area_palette)
+
+my_comparisons <- list( c("Rural Senegalese", "Urban Senegalese"), c("Urban Senegalese", "Urban Dutch"), c("Rural Senegalese", "Urban Dutch") )
+ggOut <- ggboxplot(diffOrganisms, x = "Residence", y = "nEpitope",
+          fill = "Residence")+ 
+  stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
+  stat_compare_means(label.y = 50) +
+  scale_fill_manual(values = area_palette) +
+  geom_jitter()
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/nEpitopes_residence_comparison.pdf", plot = ggOut, 
+       width =12, height = 8)
+
+ggplot(diffOrganisms, aes(x = nOrganisms, y = nEpitope, color = Residence)) +
+  geom_point() +
+  geom_jitter() +
+  scale_color_manual(values = area_palette)
+
+ggOut <- ggplot(diffOrganisms, aes(x = "", y = nEpitope)) +
+  geom_boxplot() +
+  geom_jitter() +
+  theme_minimal() +
+  xlab("") +
+  ylab("Number of significant anti-epitopes") 
+ggOut
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/n_sigAntiEpitopes.pdf", plot = ggOut, 
+       width =4, height = 8)
+
+
+#### Investigate rural, urban and dutch: PCA and cochran-armitage test (epitope presence/absence as input) ####
+
+PCoA_phip <- pcoa(jaccard(t( as.matrix(phipSeq_p) )))
+
+embedPCoord <- as.data.frame(PCoA_phip$vectors)
+embedPCoord$Residence <- metaData[row.names(embedPCoord), "Residence"]
+embedPCoord$sampleID <- row.names(embedPCoord)
+embedPCoord$Sex <- metaData[row.names(embedPCoord), "Sex"]
+embedPCoord$Age <- metaData[row.names(embedPCoord), "Age"]
+
+embedPCoord$Residence <- factor(embedPCoord$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
+
+ggplot(embedPCoord, aes(x= Axis.1, y = Axis.2, color = Residence)) +
+        geom_point()
+
+#Boxplot of PCoord2 values split by Residence
+PC2_lm <- lm(Axis.2 ~ Residence, data = embedPCoord)
+
+PC2_emm <- emmeans(PC2_lm, "Residence")
+trendOutput <- as.data.frame(contrast(PC2_emm, "poly"))
+
+pairwiseOutput <- as.data.frame(pairs(PC2_emm))
+
+group1 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(TRUE, FALSE)]
+group2 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(FALSE, TRUE)]
+
+ggpubr_formatted <- data.frame(".y."= "test", "group1" = group1, "group2" = group2,
+                               p = pairwiseOutput$p.value)
+
+dataMax <- max(embedPCoord$Axis.2)
+
+ggpubr_formatted <- ggpubr_formatted %>%
+  mutate(y.position = c( dataMax + (dataMax * 0.1) , dataMax + (dataMax * 0.2), dataMax + (dataMax * 0.3)))
+
+ggpubr_formatted$p.symbol <- gtools::stars.pval(ggpubr_formatted$p)
+ggpubr_formatted$p.symbol[ggpubr_formatted$p >= 0.05] <- "NS"
+
+trendP <- subset(trendOutput, contrast == "linear")$p.value
+if(trendP < 0.05){trendP <- "< 0.05"}else{trendP <- "\u2265 0.05"}
+
+ggOut <- ggboxplot(embedPCoord, y = "Axis.2", x = "Residence", fill = "Residence", outlier.shape = NA) +
+  stat_pvalue_manual(ggpubr_formatted, label = "p.symbol") +
+  scale_fill_manual(values = area_palette) +
+  ggtitle(label = paste0("Trend p-value ", trendP)) +
+  ylab("MDS2") +
+  xlab("") +
+  geom_jitter() +
+  grids(linetype = "solid")
+ggOut
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/PC2_boxplot.pdf", plot = ggOut, 
+       width =6, height = 8)
+
+#Save PCoA data
+write.csv(embedPCoord, "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/dataCell/processed/PCoA_coords.csv")
+
+PCoA_phip$vectors
+
+PC1_varExplained <- (PCoA_phip[["values"]][["Relative_eig"]][1] / sum(PCoA_phip[["values"]][["Relative_eig"]])) * 100
+PC2_varExplained <- (PCoA_phip[["values"]][["Relative_eig"]][2] / sum(PCoA_phip[["values"]][["Relative_eig"]])) * 100
+
+##PCoA plot coloured by Area
+
+permanovaOut <- adonis2(phipSeq_p ~ Residence, data = metaData, method = "jaccard")
+permanovaOut <- permanovaOut$`Pr(>F)`[1]
+if(permanovaOut < 0.05){permanovaOut <- "PERMANOVA < 0.05"} else{permanovaOut <- "PERMANOVA <= 0.05"}
+
+gg <- merge(embedPCoord,aggregate(cbind(mean.Axis.1=Axis.1,mean.Axis.2=Axis.2)~Residence,embedPCoord,mean),by="Residence")
+ggOut <- ggplot(gg, aes(Axis.1,Axis.2))+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0) +
+  geom_point(size=5, aes(color=Residence))+
+  geom_segment(aes(x=mean.Axis.1, y=mean.Axis.2, xend=Axis.1, yend=Axis.2, color = Residence)) +
+  geom_point(aes(x=mean.Axis.1,y=mean.Axis.2, fill=Residence), size=7, shape = 21) +
+  theme_minimal()+
+  scale_fill_manual(values = area_palette) +
+  scale_color_manual(values = area_palette)+
+  xlab(paste0("MDS1 (", round(PC1_varExplained, digits = 2), "%)"))+
+  ylab(paste0("MDS2 (", round(PC2_varExplained, digits = 2), "%)")) +
+  ggtitle(permanovaOut)
+ggOut
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/MDSPlot_filteredData_residenceColour.pdf", plot = ggOut, 
+       width = 9, height = 8)
+
+##PCoA plot coloured by Sex
+permanovaOut <- adonis2(phipSeq_p ~ Sex, data = metaData, method = "jaccard")
+permanovaOut <- permanovaOut$`Pr(>F)`[1]
+if(permanovaOut < 0.05){permanovaOut <- "PERMANOVA < 0.05"} else{permanovaOut <- "PERMANOVA <= 0.05"}
+
+#PERMANOVA for sex when dutch removed
+adonis2(phipSeq_p[row.names(subset(metaData, Residence != "Urban Dutch")),] ~ Sex, data = subset(metaData, Residence != "Urban Dutch"), method = "jaccard")
+
+gg <- merge(embedPCoord,aggregate(cbind(mean.Axis.1=Axis.1,mean.Axis.2=Axis.2)~Sex,embedPCoord,mean),by="Sex")
+ggOut <- ggplot(gg, aes(Axis.1,Axis.2))+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0) +
+  geom_point(size=5, aes(color=Sex))+
+  geom_segment(aes(x=mean.Axis.1, y=mean.Axis.2, xend=Axis.1, yend=Axis.2, color = Sex)) +
+  geom_point(aes(x=mean.Axis.1,y=mean.Axis.2, fill=Sex), size=7, shape = 21) +
+  theme_minimal()+
+  xlab(paste0("MDS1 (", round(PC1_varExplained, digits = 2), "%)"))+
+  ylab(paste0("MDS2 (", round(PC2_varExplained, digits = 2), "%)")) +
+  ggtitle(permanovaOut)
+ggOut
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/MDSPlot_filteredData_sexColour.pdf", plot = ggOut, 
+       width = 9, height = 8)
+
+##PCoA plot coloured by Age
+axis1Res <- cor.test(embedPCoord$Axis.1, embedPCoord$Age)
+axis1Res <- if(axis1Res$p.value < 0.05){axis1Res <- paste0("MDS1 vs Age: p < 0.05 cor = ", axis1Res$estimate)}else{axis1Res <- paste0("MDS1 vs Age: p >= 0.05 cor = ", axis1Res$estimate)}
+
+axis2Res <- cor.test(embedPCoord$Axis.2, embedPCoord$Age)
+axis2Res <- if(axis2Res$p.value < 0.05){axis2Res <- paste0("MDS2 vs Age: p < 0.05 cor = ", axis2Res$estimate)}else{axis2Res <- paste0("MDS2 vs Age: p >= 0.05 cor = ", axis2Res$estimate)}
+
+ggOut <- ggplot(embedPCoord, aes(Axis.1,Axis.2, color = Age))+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0) +
+  geom_point(size=5) +
+  theme_minimal() +
+  xlab(paste0("MDS1 (", round(PC1_varExplained, digits = 2), "%)"))+
+  ylab(paste0("MDS2 (", round(PC2_varExplained, digits = 2), "%)")) +
+  scale_color_viridis_b() +
+  ggtitle(paste0(axis1Res, "\n", axis2Res)) 
+ggOut
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/MDSPlot_filteredData_ageColour.pdf", plot = ggOut, 
+       width = 9, height = 8)
 
 
 #Perform Cochran Armitage test to test for trend across Urbanization. Adjust p-value with bonferronni
@@ -864,38 +568,11 @@ ggplot() + geom_point(aes(x= testDF$Z,y= testDF$p.value))
 
 
 #Save significance results
-write.csv(testDF, "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/data/processed/cochranArmitage_urbanization.csv")
+write.csv(testDF, "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/dataCell//processed/cochranArmitage_urbanization.csv")
 
 #Save amino acid sequence of sig epitopes
 testDF$aa_seq <- peptideInfo[testDF$ID ,"aa_seq"]
-write.csv(testDF, "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/data/processed/cochranArmitage_urbanization_aaSeq.csv")
-
-### OLD SECTION start ###
-# 
-# #Investigate organisms
-# decreaseWithUrbanization <- table(subset(testSigDF, Z > 0)$Pathogen)
-# increaseWithUrbanization <- table(subset(testSigDF, Z < 0)$Pathogen)
-# 
-# #Normalise for how many times an epitope of that organism is present in the dataset
-# pathogenTotals <- table(peptideInfo$Pathogen)
-# 
-# decreaseWithUrbanization <- decreaseWithUrbanization / pathogenTotals[names(decreaseWithUrbanization)]
-# increaseWithUrbanization <- increaseWithUrbanization / pathogenTotals[names(increaseWithUrbanization)]
-# 
-# wordcloud2(decreaseWithUrbanization, size = 0.4)
-# wordcloud2(increaseWithUrbanization, size = 0.8)
-# 
-# #Plot the enrichment of the organisms 
-# plotDF <- data.frame("enrichment" = c(as.numeric(decreaseWithUrbanization), as.numeric(increaseWithUrbanization) * -1 ),
-#                      "organism" = c(as.character(names(decreaseWithUrbanization)), as.character(names(increaseWithUrbanization)) ),
-#                      "direction" = c( rep("Rural Senegalese", length(decreaseWithUrbanization)), rep("Urban Dutch", length(increaseWithUrbanization)) ))
-# 
-# #Order by enrichment score
-# plotDF <- plotDF[order(plotDF$enrichment, decreasing = F), ]
-# 
-# plotDF$organism <- factor(plotDF$organism, unique(plotDF$organism))
-
-### OLD SECTION end ###
+write.csv(testDF, "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/dataCell//processed/cochranArmitage_urbanization_aaSeq.csv")
 
 #Average trend z value across direction and organism
 
@@ -939,33 +616,8 @@ ggOut <- ggplot(plotDF, aes(x = medianZ, y = Pathogen_commonEpitope, fill = dire
   scale_fill_manual(values = area_palette)
 ggOut 
 ggsave(filename = paste0("plots/figure_components/commonProtein_cochranArmitage_medianTrendZ_barplot.pdf"), plot = ggOut)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/commonProtein_cochranArmitage_medianTrendZ_barplot.pdf", plot = ggOut, 
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/commonProtein_cochranArmitage_medianTrendZ_barplot.pdf", plot = ggOut, 
        width = 16, height = 8)
-
-#NLR relationship with shigella epitopes
-normTotalEpitope_DF$NLR <- metaData_complex[row.names(normTotalEpitope_DF),"NLR"]
-
-ggplot(normTotalEpitope_DF, aes(x = NLR, y  = shigellaflexneriTotalNorm, color = Residence)) +
-        geom_point()
-
-ggplot(normTotalEpitope_DF, aes(x = NLR, y  = shigellasonneiTotalNorm, color = Residence)) +
-  geom_point()
-
-#IL-8 circulating levels and shigella epitopes
-luminexData <- readRDS("urban-rural-study-manuscript/data/data_luminex.rds")
-row.names(luminexData) <- luminexData$donor
-
-normTotalEpitope_DF$shigellaTotalNorm <- rowSums(normTotalEpitope_DF[, str_detect(colnames(normTotalEpitope_DF), "shigelladys|shigellaflex|shigellason|shigellaboy|shigellasen")])
-
-normTotalEpitope_DF$IL8 <- luminexData[row.names(normTotalEpitope_DF),"il8_cxcl8"]
-
-ggplot(normTotalEpitope_DF, aes(x = IL8, y  = shigellaflexneriTotalNorm, color = Residence)) +
-  geom_point() +
-  stat_cor()
-  
-
-ggplot(normTotalEpitope_DF, aes(x = shigellaflexneriTotalNorm, y  = shigellaphageTotalNorm, color = Residence)) +
-  geom_point()
 
 #Look at the significant results
 phipSeq_p_freq_residence_raw_df$Residence <- row.names(phipSeq_p_freq_residence_raw_df)
@@ -986,7 +638,7 @@ ggOut <- ggplot(subset(plotDF, variable %in% subset(testSigDF, Z < 0)$ID), aes(x
   rotate_x_text()
 ggOut
 ggsave(filename = paste0("plots/figure_components/sup_figures/cochranArmitage_increaseWithUrbanization_epitopePercentPresent.pdf"), plot = ggOut, width = 20, height = 20)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/cochranArmitage_increaseWithUrbanization_epitopePercentPresent.pdf", plot = ggOut, 
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/cochranArmitage_increaseWithUrbanization_epitopePercentPresent.pdf", plot = ggOut, 
        width = 14, height = 12)
 
 #Decreasing with urbanization
@@ -1000,59 +652,97 @@ ggOut <- ggplot(subset(plotDF, variable %in% subset(testSigDF, Z > 0)$ID), aes(x
   rotate_x_text()
 ggOut
 ggsave(filename = paste0("plots/figure_components/sup_figures/cochranArmitage_decreaseWithUrbanization_epitopePercentPresent.pdf"), plot = ggOut, width = 20, height = 20)
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/cochranArmitage_decreaseWithUrbanization_epitopePercentPresent.pdf", plot = ggOut, 
+ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/cochranArmitage_decreaseWithUrbanization_epitopePercentPresent.pdf", plot = ggOut, 
        width = 14, height = 12)
 
-#Look at staph aureus exported protein
-aureusEMP<- subset(peptideInfo,len_seq == "315.0" & Protein == "exported protein" )
+#### Carry out trend test on normalised pathogen totals ####
 
-ggOut <- ggplot(subset(plotDF, variable %in% row.names(aureusEMP)), aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~variable) +
-  scale_fill_manual(values = area_palette) +
-  ylim(0, 100) +
-  theme_minimal() +
-  rotate_x_text()
-ggOut
+plotDF <- normTotalEpitope_DF
 
-#Plot the top three enriched pathogens as the normalised frequencies
-plotDF <- normTotalEpitope_DF[,-which(colnames(normTotalEpitope_DF) == "epitopeTotals")]
+plotDF$Residence <- factor(plotDF$Residence, levels =  c("Rural Senegalese" , "Urban Senegalese" , "Urban Dutch" ))
 
-ggplot(plotDF, aes(x = staphylococcusaureusTotalNorm, y = Residence, fill = Residence)) +
-        geom_boxplot() +
-        geom_jitter() +
-        theme_minimal()  +
-        scale_fill_manual(values = area_palette) +
-        xlab("Proportion of Ab-OME against organism epitopes") +
-        ylab("")
+#Remove _ from the colnames
+colnames(plotDF) <- str_replace_all(colnames(plotDF), "_|\\:|\\.|\\(|\\)|\\=|\\,|\\||\\&", "")
 
-ggplot(plotDF, aes(x = streptococcuspyogenesTotalNorm, y = Residence, fill = Residence)) +
-  geom_boxplot() +
-  geom_jitter() +
-  theme_minimal()  +
-  scale_fill_manual(values = area_palette) +
-  xlab("Proportion of Ab-OME against organism epitopes") +
-  ylab("")
-
-ggplot(plotDF, aes(x = homosapiensTotalNorm, y = Residence, fill = Residence)) +
-  geom_boxplot() +
-  geom_jitter() +
-  theme_minimal()  +
-  scale_fill_manual(values = area_palette) +
-  xlab("Proportion of Ab-OME against organism epitopes") +
-  ylab("")
-
-
-top4 <- c("humanherpesvirus1TotalNorm", "shigellasonneiTotalNorm", "shigellaflexneriTotalNorm", "humangammaherpesvirus8TotalNorm",
-          "haemophilusinfluenzaeTotalNorm", "epsteinbarrvirusTotalNorm", "escherichiacoliTotalNorm", "streptococcusdysgalactiaeTotalNorm")
-
-#Calculate significance
-featuresTest <- normTotalEpitope_DF[, c(top4, "Residence")]
-unique(featuresTest$Residence)
+plotDF <- plotDF %>%
+                dplyr::select(matches("TotalNorm|Residence"))
 
 plotList <- list()
+pvalDF <- data.frame()
+ggpubrFormatList <- list()
 
-for(i in top4){
+pathogenNames <- colnames(plotDF)
+pathogenNames <- pathogenNames[-which(pathogenNames == "Residence")]
+
+for(i in unique(pathogenNames)){
+  
+  featuresTest_lm <- lm(eval(parse(text = i)) ~ Residence, data = plotDF)
+  
+  featureTest_emm <- emmeans(featuresTest_lm, "Residence")
+  trendOutput <- as.data.frame(contrast(featureTest_emm, "poly"))
+  
+  pairwiseOutput <- as.data.frame(pairs(featureTest_emm))
+  
+  group1 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(TRUE, FALSE)]
+  group2 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(FALSE, TRUE)]
+  
+  ggpubr_formatted <- data.frame(".y."= "test", "group1" = group1, "group2" = group2,
+                                 p = pairwiseOutput$p.value)
+  
+  dataMax <- max(plotDF[, i])
+  
+  ggpubr_formatted <- ggpubr_formatted %>%
+    mutate(y.position = c( dataMax + (dataMax * 0.1) , dataMax + (dataMax * 0.2), dataMax + (dataMax * 0.3)))
+  
+  ggpubr_formatted$p.symbol <- gtools::stars.pval(ggpubr_formatted$p)
+  ggpubr_formatted$p.symbol[ggpubr_formatted$p >= 0.05] <- "NS"
+  
+  trendP <- subset(trendOutput, contrast == "linear")$p.value
+  trendEstimate <- subset(trendOutput, contrast == "linear")$estimate
+  #if(trendP < 0.05){trendP <- "< 0.05"}else{trendP <- "\u2265 0.05"}
+  
+  pvalDF <- rbind(pvalDF, data.frame(measurement = i,
+                                     pval = trendP,
+                                     estimate = trendEstimate))
+  
+  ggpubrFormatList[[i]] <- ggpubr_formatted
+  
+
+}
+
+pvalDF$p_adj <- p.adjust(pvalDF$pval, method = "BH")
+
+ggOut <- ggboxplot(plotDF, y = "humangammaherpesvirus8TotalNorm", x = "Residence", fill = "Residence", outlier.shape = NA) + 
+  scale_fill_manual(values = area_palette) +
+  xlab("") +
+  geom_jitter() +
+  grids(linetype = "solid") +
+  coord_flip() + 
+  guides(fill="none")
+ggOut
+
+#Plot the significant pathogens
+featuresTest <- normTotalEpitope_DF
+
+#Remove _ from the colnames
+colnames(featuresTest) <- str_replace_all(colnames(featuresTest), "_|\\:|\\.|\\(|\\)|\\=|\\,|\\||\\&", "")
+
+#Seperate the data into the different trend directions, then take the top 4 in terms of adjusted p-value
+posDirection <- subset(pvalDF, estimate > 0)
+negDirection <- subset(pvalDF, estimate < 0)
+
+top4Pos <- posDirection$p_adj
+names(top4Pos) <- posDirection$measurement
+top4Pos <- names(top4Pos[order(top4Pos, decreasing = FALSE)])[1:4]
+
+top4Neg <- negDirection$p_adj
+names(top4Neg) <- negDirection$measurement
+top4Neg <- names(top4Neg[order(top4Neg, decreasing = FALSE)])[1:4]
+
+featuresTest <- featuresTest[,c(top4Pos, top4Neg, "Residence")]
+
+
+for(i in c(top4Pos, top4Neg) ){
   plotName <- str_replace_all(i, "TotalNorm", "")
   
   featuresTest_lm <- lm(eval(parse(text = i)) ~ Residence, data = featuresTest)
@@ -1076,8 +766,9 @@ for(i in top4){
   ggpubr_formatted$p.symbol <- gtools::stars.pval(ggpubr_formatted$p)
   ggpubr_formatted$p.symbol[ggpubr_formatted$p >= 0.05] <- "NS"
   
-  trendP <- subset(trendOutput, contrast == "linear")$p.value
-  if(trendP < 0.05){trendP <- "< 0.05"}else{trendP <- "\u2265 0.05"}
+  trendP <- pvalDF[pvalDF$measurement == i,"p_adj"]
+  #if(trendP < 0.05){trendP <- "< 0.05"}else{trendP <- "\u2265 0.05"}
+  trendP <- signif(trendP, digits = 3)
   
   ggOut <- ggboxplot(featuresTest, y = i, x = "Residence", fill = "Residence", outlier.shape = NA) +
     stat_pvalue_manual(ggpubr_formatted, label = "p.symbol") +
@@ -1087,32 +778,28 @@ for(i in top4){
     xlab("") +
     geom_jitter() +
     grids(linetype = "solid") +
-    rotate() + 
+    coord_flip() + 
     guides(fill="none")
   
-  ggsave(filename = paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/normPathogenPlots/",i,"_enrichment_urbanization_normPathogen.pdf"), plot = ggOut, 
-         width = 10, height = 4)
-
+  ggsave(filename = paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/normPathogenPlots_figure/",i,"_enrichment_urbanization_normPathogen.pdf"), plot = ggOut, 
+         width = 6, height = 4)
+  
   plotList[[i]] <- ggOut
 }
 
 
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/organism_enrichment_urbanization_normPathogen.pdf", 
-       plot = ggarrange(plotlist = plotList, ncol = 6, nrow = 6), 
-       width = 28, height = 12)
-
-
-#Test all organisms in the significant epitopes list
-sigOrganisms <- c(paste0(unique(str_replace_all(testSigDF$Pathogen, "-| |\\/", "")), "TotalNorm"))
-
-featuresTest <- normTotalEpitope_DF[, c(sigOrganisms, "Residence")]
+#Calculate significance
+featuresTest <- normTotalEpitope_DF
 unique(featuresTest$Residence)
 
-plotList <- list()
-pvalDF <- data.frame()
-ggpubrFormatList <- list()
+#Remove _ from the colnames
+colnames(featuresTest) <- str_replace_all(colnames(featuresTest), "_|\\:|\\.|\\(|\\)|\\=|\\,|\\||\\&", "")
 
-for(i in sigOrganisms){
+plotList <- list()
+
+
+for(i in c(pvalDF$measurement) ){
+  plotName <- str_replace_all(i, "TotalNorm", "")
   
   featuresTest_lm <- lm(eval(parse(text = i)) ~ Residence, data = featuresTest)
   
@@ -1135,99 +822,450 @@ for(i in sigOrganisms){
   ggpubr_formatted$p.symbol <- gtools::stars.pval(ggpubr_formatted$p)
   ggpubr_formatted$p.symbol[ggpubr_formatted$p >= 0.05] <- "NS"
   
-  trendP <- subset(trendOutput, contrast == "linear")$p.value
+  trendP <- pvalDF[pvalDF$measurement == i,"p_adj"]
   #if(trendP < 0.05){trendP <- "< 0.05"}else{trendP <- "\u2265 0.05"}
-  
-  pvalDF <- rbind(pvalDF, data.frame(organism = i,
-                                     pval = trendP))
-  
-  ggpubrFormatList[[i]] <- ggpubr_formatted
-  
-}
-
-pvalDF$p_adj <- p.adjust(pvalDF$pval, method = "BH")
-
-#Make plots
-for(i in sigOrganisms){
-
-  currentTrendP <- subset(pvalDF, organism == i)$p_adj
-  current_ggpubr_formatted <- ggpubrFormatList[[i]]
-  plotName <- str_replace_all(i, "TotalNorm", "")
+  trendP <- signif(trendP, digits = 3)
   
   ggOut <- ggboxplot(featuresTest, y = i, x = "Residence", fill = "Residence", outlier.shape = NA) +
-    stat_pvalue_manual(current_ggpubr_formatted, label = "p.symbol") +
+    stat_pvalue_manual(ggpubr_formatted, label = "p.symbol") +
     scale_fill_manual(values = area_palette) +
-    ggtitle(label = paste0("Trend p-value ", currentTrendP)) +
+    ggtitle(label = paste0("Trend p-value ", trendP)) +
     ylab(plotName) +
     xlab("") +
     geom_jitter() +
     grids(linetype = "solid") +
-    rotate()+ 
+    coord_flip() + 
     guides(fill="none")
-
-  ggsave(filename = paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/normPathogenPlots/",i,"_enrichment_urbanization_normPathogen.pdf"), plot = ggOut, 
-       width = 5.5, height = 4)
+  
+  ggsave(filename = paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/normPathogenPlots/",i,"_enrichment_urbanization_normPathogen.pdf"), plot = ggOut, 
+         width = 6, height = 4)
   
   plotList[[i]] <- ggOut
-  
+}
 
+#### Calculate diversity metrics at the organism level ####
+
+#The results seem to show
+#The richness is not different between the groups, nor is shannon diversity
+#PERMANOVA shows differences
+#Betadispersion isn't different, but the senegalese ones have greater variability for distance from centroid
+
+library("ape")
+library("vegan")
+library("dplyr")
+library("hagis")
+library("ggplot2")
+
+data(BCI)
+data(dune)
+data(dune.env)
+data(sipoo)
+data(varespec)
+
+
+#We calculate diversity not on the epitopes, but on the organisms
+
+totalEpitope_DF <- data.frame(epitopeTotals = rowSums(phipSeq_p_raw[metaData$ID,]),
+                                  row.names = metaData$ID)
+
+pathogens <- unique(peptideInfo$Pathogen)
+
+for(i in pathogens){
+  
+  peptideInfoCurrent <- peptideInfo[peptideInfo$Pathogen == i,]
+  
+  currentEpitopes <- row.names(peptideInfoCurrent)
+  
+  #Add current epitopes bound to data frame
+  if(length(currentEpitopes)==1){
+    currentEpitopesTotals <- phipSeq_p_raw[,currentEpitopes]
+    
+  }
+  
+  
+  else{
+    currentEpitopesTotals <- rowSums(phipSeq_p_raw[,currentEpitopes])
+    
+  }
+  
+  #Sort name 
+  i <- str_replace_all(i, "-| |\\/", "")
+  
+  totalEpitope_DF[[paste0(i, "TotalNorm")]] <- currentEpitopesTotals[row.names(totalEpitope_DF)] 
+  
+}
+
+allData <- totalEpitope_DF
+
+allData$Residence <- metaData[row.names(allData),"Residence"]
+
+urbanPhipSeq <- subset(allData, Residence == "Urban Senegalese")
+ruralPhipSeq <- subset(allData, Residence == "Rural Senegalese")
+dutchPhipSeq <- subset(allData, Residence == "Urban Dutch")
+
+urbanPhipSeq <- urbanPhipSeq %>% dplyr::select(!c(Residence, epitopeTotals))
+ruralPhipSeq <- ruralPhipSeq %>% dplyr::select(!c(Residence, epitopeTotals))
+dutchPhipSeq <- dutchPhipSeq %>% dplyr::select(!c(Residence, epitopeTotals))
+
+#New section
+organismCounts <- rbind(rbind(ruralPhipSeq, urbanPhipSeq), dutchPhipSeq)
+organismCounts_binary <- as.matrix(organismCounts/organismCounts)
+organismCounts_binary[is.na(organismCounts_binary)] <- 0
+epitopeCounts <- phipSeq_p_raw_df
+
+sppr <- specnumber(organismCounts_binary)
+
+#Species richness is not different across the sites
+sppr_aov <- aov(sppr ~ Residence, data = metaData[row.names(organismCounts_binary),])
+summary(sppr_aov)
+
+shannonOut <- diversity(organismCounts_binary)
+shannonPlot <- data.frame("shannon" = shannonOut,
+                          "Residence" = factor(metaData[names(shannonOut),"Residence"], levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch")))
+
+shannon_lm <- lm(shannon ~ Residence, data = shannonPlot)
+
+shannon_emm <- emmeans(shannon_lm, "Residence")
+trendOutput <- as.data.frame(contrast(shannon_emm, "poly"))
+
+pairwiseOutput <- as.data.frame(pairs(shannon_emm))
+
+group1 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(TRUE, FALSE)]
+group2 <- unlist(str_split(pairwiseOutput$contrast, " - "))[c(FALSE, TRUE)]
+
+ggpubr_formatted <- data.frame(".y."= "test", "group1" = group1, "group2" = group2,
+                               p = pairwiseOutput$p.value)
+
+dataMax <- max(shannonPlot$shannon)
+
+ggpubr_formatted <- ggpubr_formatted %>%
+  mutate(y.position = c( dataMax + (dataMax * 0.1) , dataMax + (dataMax * 0.2), dataMax + (dataMax * 0.3)))
+
+ggpubr_formatted$p.symbol <- gtools::stars.pval(ggpubr_formatted$p)
+ggpubr_formatted$p.symbol[ggpubr_formatted$p >= 0.05] <- "NS"
+
+trendP <- subset(trendOutput, contrast == "linear")$p.value
+if(trendP < 0.05){trendP <- "< 0.05"}else{trendP <- "\u2265 0.05"}
+
+ggOut <- ggboxplot(shannonPlot, y = "shannon", x = "Residence", fill = "Residence", outlier.shape = NA) +
+  stat_pvalue_manual(ggpubr_formatted, label = "p.symbol") +
+  scale_fill_manual(values = area_palette) +
+  ggtitle(label = paste0("Trend p-value ", trendP)) +
+  ylab("Shannon entropy") +
+  xlab("") +
+  geom_jitter() +
+  grids(linetype = "solid")
+ggOut
+
+bird_perm <- adonis2(organismCounts ~ Residence, data = metaData[row.names(organismCounts),], method = "bray")
+bird_perm
+
+x <- betadisper(vegdist(organismCounts, method = "bray"), group = metaData$Residence, type = "median")
+anova(x)
+TukeyHSD(x)
+boxplot(x)
+
+#Because of the class imbalance, bootstrap 8 individuals per group and then perform dispersion tests
+selectedN <- 8
+
+distMedianAvg <- data.frame("sum" = rep(0, nrow(metaData)), 
+                            "i" = rep(0, nrow(metaData)),
+                            "Residence" = metaData$Residence,
+                            row.names = row.names(metaData))
+
+for(i in 1:50){
+  
+  urbDutch_sample <- subset(metaData, Residence == "Urban Dutch")
+  urbDutch_sample <- row.names(urbDutch_sample[sample(row.names(urbDutch_sample), size = selectedN, replace = FALSE),])
+  
+  urbSenegal_sample <- subset(metaData, Residence == "Urban Senegalese")
+  urbSenegal_sample <- row.names(urbSenegal_sample[sample(row.names(urbSenegal_sample), size = selectedN, replace = FALSE),])
+  
+  rurSenegal_sample <- subset(metaData, Residence == "Rural Senegalese")
+  rurSenegal_sample <- row.names(rurSenegal_sample[sample(row.names(rurSenegal_sample), size = selectedN, replace = FALSE),])
+  
+  selectedSamples <- c(urbDutch_sample, urbSenegal_sample, rurSenegal_sample)
+  
+  currentData <- organismCounts[selectedSamples,]
+  currentMetaData <- metaData[selectedSamples,]
+  
+  betaDisp_res <- betadisper(vegdist(currentData, method = "bray"), group = currentMetaData$Residence, type = "median")
+  
+  distMedianAvg[selectedSamples,"i"]  <- distMedianAvg[selectedSamples,"i"] + 1
+  distMedianAvg[selectedSamples,"sum"] <- distMedianAvg[selectedSamples,"sum"] + betaDisp_res$distances[selectedSamples]
+  
+}
+
+distMedianAvg$avg <- distMedianAvg$sum / distMedianAvg$i
+
+ggplot(distMedianAvg, aes(x= Residence, y = avg)) +
+        geom_boxplot()
+
+mod3 <- betadisper(vegdist(organismCounts, method = "bray"), metaData$Residence, type = "centroid")
+mod3
+permutest(mod3, permutations = 99)
+anova(mod3)
+plot(mod3)
+boxplot(mod3)
+plot(TukeyHSD(mod3))
+
+#Jaccard on epitope presence
+epitopeCounts.jaccard <-
+  vegdist(epitopeCounts, "jaccard", na.rm = TRUE)
+princoor.epitopeCounts <- pcoa(epitopeCounts.jaccard) 
+
+princoor.epitopeCounts.data <-
+  data.frame(
+    Sample = rownames(princoor.epitopeCounts$vectors),
+    X = princoor.epitopeCounts$vectors[, 1],
+    Y = princoor.epitopeCounts$vectors[, 2]
+  )
+
+princoor.epitopeCounts.data$Residence <- metaData[princoor.epitopeCounts.data$Sample,"Residence"]
+
+ggplot(data = princoor.epitopeCounts.data, aes(x = X, y = Y)) +
+  geom_point(aes(colour = Residence))  +
+  theme_bw() +
+  theme(
+    axis.title.x = element_text(face = "bold", size = 15),
+    axis.title.y = element_text(face = "bold", size = 15),
+    axis.text = element_text(face = "bold", size = 10),
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(face = "bold", size = 10),
+    legend.key.size = unit(1, 'lines')
+  ) +
+  stat_ellipse(data = princoor.epitopeCounts.data, aes(x = X, y = Y),
+               level = 0.95) +
+  ggtitle("Pathotype Jaccard Distances PCOA") +
+  scale_color_manual(values = area_palette)
+
+epitope.disp <-
+  betadisper(epitopeCounts.jaccard, princoor.epitopeCounts.data$Residence)
+anova(epitope.disp)
+TukeyHSD(epitope.disp)
+plot(epitope.disp, hull = FALSE, ellipse = TRUE)
+
+adonisOut <- adonis2(epitopeCounts.jaccard ~  princoor.epitopeCounts.data$Residence)
+adonisOut
+
+pairwise_permanova(sp_matrix = epitopeCounts, group_var = embedPCoord$Residence, dist = "jaccard")
+
+#Jaccard on organism presence
+organismCounts.jaccard <-
+  vegdist(organismCounts_binary, "jaccard", na.rm = TRUE)
+princoor.organismCounts <- pcoa(organismCounts.jaccard) 
+
+princoor.organismCounts.data <-
+  data.frame(
+    Sample = rownames(princoor.organismCounts$vectors),
+    X = princoor.organismCounts$vectors[, 1],
+    Y = princoor.organismCounts$vectors[, 2]
+  )
+
+princoor.organismCounts.data$Residence <- metaData[princoor.organismCounts.data$Sample,"Residence"]
+
+ggplot(data = princoor.organismCounts.data, aes(x = X, y = Y)) +
+  geom_point(aes(colour = Residence))  +
+  theme_bw() +
+  theme(
+    axis.title.x = element_text(face = "bold", size = 15),
+    axis.title.y = element_text(face = "bold", size = 15),
+    axis.text = element_text(face = "bold", size = 10),
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(face = "bold", size = 10),
+    legend.key.size = unit(1, 'lines')
+  ) +
+  stat_ellipse(data = princoor.organismCounts.data, aes(x = X, y = Y),
+               level = 0.95) +
+  ggtitle("Pathotype Jaccard Distances PCOA") +
+  scale_color_manual(values = area_palette)
+
+organism.disp <-
+  betadisper(organismCounts.jaccard, princoor.organismCounts.data$Residence)
+anova(organism.disp)
+TukeyHSD(organism.disp)
+plot(organism.disp, hull = FALSE, ellipse = TRUE)
+
+adonisOut <- adonis2(organismCounts.jaccard ~  princoor.organismCounts.data$Residence)
+adonisOut
+
+head(BCI)
+
+epitopeDiv <- diversity(epitopeCounts)
+organismDiv <- diversity(organismCounts)
+
+epitope_rare <- rarefy(epitopeCounts, min(rowSums(epitopeCounts)))
+organism_rare <- rarefy(organismCounts, min(rowSums(organismCounts)))
+
+organismRare_DF <- data.frame("rare_rich" = organism_rare,
+                              "Residence" = factor(metaData[names(organism_rare),"Residence"], levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch") ))
+
+stat.test <- organismRare_DF %>%
+                wilcox_test(rare_rich ~ Residence) %>%
+                add_significance() %>%
+                adjust_pvalue(method = "BH") %>%
+                add_xy_position("Residence")
+
+ggplot(organismRare_DF, aes(x = Residence, y = rare_rich, fill = Residence)) +
+          geom_boxplot(outlier.shape = NA) +
+          geom_point(position = position_jitterdodge())+
+          scale_fill_manual(values = area_palette) +
+          stat_compare_means()
+
+z <- betadiver(organismCounts, "z")
+mod <- with(metaData, betadisper(z, Residence))
+mod
+
+outputDF <- rbind(rbind(ruralPhipSeq, urbanPhipSeq), dutchPhipSeq)
+
+simpsonRes <- diversity(outputDF,index = "simpson")
+
+simpsonPlot <- data.frame(simpsonRes)
+simpsonPlot$Residence <- metaData[row.names(simpsonPlot), "Residence"]
+
+simpsonPlot$Residence <- factor(simpsonPlot$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
+
+simpsonTest <- simpsonPlot %>%
+  wilcox_test(simpsonRes ~ Residence) %>%
+  add_significance() %>%
+  adjust_pvalue(method = "BH") %>%
+  add_xy_position("Residence")
+
+ggOut <- ggboxplot(simpsonPlot, x= "Residence", y = "simpsonRes", fill = "Residence", outlier.shape = NA)  +
+  geom_point(position = position_jitterdodge(), aes(fill = Residence)) +
+  stat_pvalue_manual(simpsonTest)+
+  scale_fill_manual(values= area_palette) +
+  stat_compare_means()+
+  ylab("Simpson's Index") +
+  xlab("")
+
+ggOut
+ggsave(filename = paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/simpsonDiversity_organism.pdf"), plot = ggOut)
+
+shannonRes <- diversity(outputDF,index = "shannon")
+
+shannonPlot <- data.frame(shannonRes)
+shannonPlot$Residence <- metaData[row.names(shannonPlot), "Residence"]
+
+shannonPlot$Residence <- factor(shannonPlot$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
+
+shannonTest <- shannonPlot %>%
+                wilcox_test(shannonRes ~ Residence) %>%
+                add_significance() %>%
+                adjust_pvalue(method = "BH") %>%
+                add_xy_position("Residence")
+
+ggOut <- ggboxplot(shannonPlot, x= "Residence", y = "shannonRes", fill = "Residence", outlier.shape = NA)  +
+  geom_point(position = position_jitterdodge(), aes(fill = Residence)) +
+  stat_pvalue_manual(shannonTest)+
+  scale_fill_manual(values= area_palette) +
+  stat_compare_means()+
+  ylab("Simpson's Index") +
+  xlab("")
+
+ggsave(filename = paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/shannonDiversity_organism.pdf"), plot = ggOut)
+
+ggplot(simpsonPlot, aes(x = simpsonRes, y = Residence, fill = Residence)) + 
+    geom_density_ridges() +
+    geom_point() +
+    scale_fill_manual(values = area_palette) +
+    theme_classic() +
+    xlab("Simpson's Index") +
+    ylab("")
+
+#### Representative urban, rural and dutch proportion barplot ####
+
+phipSeq_p_residence_raw_df <- phipSeq_p_raw_df
+
+phipSeq_p_residence_raw_df$Residence <- metaData[row.names(phipSeq_p_residence_raw_df), "Residence"]
+
+phipSeq_p_residence_raw_df <- phipSeq_p_residence_raw_df %>%
+                                group_by(Residence) %>%
+                                summarise(across(everything(), ~ sum(.x)))
+phipSeq_p_residence_raw_df <- as.data.frame(phipSeq_p_residence_raw_df)
+row.names(phipSeq_p_residence_raw_df) <- phipSeq_p_residence_raw_df$Residence
+phipSeq_p_residence_raw_df$Residence <- NULL
+
+normTotalEpitope_residence_DF <- data.frame(epitopeTotals = rowSums(phipSeq_p_residence_raw_df),
+                                            row.names = row.names(phipSeq_p_residence_raw_df))
+
+
+pathogens <- unique(peptideInfo$Pathogen)
+
+for(i in pathogens){
+  
+  peptideInfoCurrent <- peptideInfo[peptideInfo$Pathogen == i,]
+  
+  currentEpitopes <- row.names(peptideInfoCurrent)
+  
+  #Add current epitopes bound to data frame
+  if(length(currentEpitopes)==1){
+    currentEpitopesTotals <- phipSeq_p_residence_raw_df[,currentEpitopes]
+    
+  }
+  
+  
+  else{
+    currentEpitopesTotals <- rowSums(phipSeq_p_residence_raw_df[,currentEpitopes])
+    
+  }
+  
+  #Sort name 
+  i <- str_replace_all(i, "-| |\\/", "")
+  
+  normTotalEpitope_residence_DF[[paste0(i, "TotalNorm")]] <- (currentEpitopesTotals[row.names(normTotalEpitope_residence_DF)] / normTotalEpitope_residence_DF$epitopeTotals) * 100
+  
 }
 
 
 
-ggsave(filename = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/organism_enrichment_urbanization_normPathogen.pdf", 
-       plot = ggarrange(plotlist = plotList, ncol = 6, nrow = 6), 
-       width = 28, height = 22)
 
+#### Compare correlations in epitope-ome proportions for senegalese ####
 
-#Get the individuals who have antibody against gammaherpes virus 8
-individualsGH8 <- row.names(subset(normTotalEpitope_DF, humangammaherpesvirus8TotalNorm > 0))
-individualsGH8_meta <- metaData_complex[individualsGH8,]
+senegaleseData <- normTotalEpitope_DF[str_detect(row.names(normTotalEpitope_DF), "LD", negate = TRUE),]
+senegaleseData <- senegaleseData[,-which(colnames(senegaleseData) == "epitopeTotals")]
+senegaleseData$MDS2 <- embedPCoord[row.names(senegaleseData), "Axis.2"]
 
-individualsCMV <- row.names(subset(normTotalEpitope_DF, humancytomegalovirusTotalNorm > 0))
-individualsCMV_meta <- metaData_complex[individualsCMV,]
+corSenegal <- cor( as.matrix( senegaleseData[,-which(colnames(senegaleseData) %in% c("Residence", "Donor") )] ))
 
-embedPC$GH8Pos <- "negative"
-embedPC[individualsGH8,"GH8Pos"] <- "positive"
+flexneri_negCor <- names(sort(corSenegal[, str_detect(colnames(corSenegal), "flexneri")], decreasing = FALSE)[1:10])
+#sort(corSenegal[, str_detect(colnames(corSenegal), "flexneri")], decreasing = TRUE)[1:10]
 
-embedPC$CMVPos <- "negative"
-embedPC[individualsCMV,"CMVPos"] <- "positive"
+corRural <- cor( as.matrix( senegaleseData[ senegaleseData$Residence == "Rural Senegalese" ,-which(colnames(senegaleseData) %in% c("Residence", "Donor") )] ))
+corUrban <- cor( as.matrix( senegaleseData[ senegaleseData$Residence == "Urban Senegalese" ,-which(colnames(senegaleseData) %in% c("Residence", "Donor") )] ))
 
+corRural <- corRural["shigellaflexneriTotalNorm",flexneri_negCor]
+corUrban <- corUrban["shigellaflexneriTotalNorm",flexneri_negCor]
 
-ggplot(embedPC, aes(x = PC1, y = PC2, color = GH8Pos)) +
-          geom_point() +
-          facet_wrap(~Residence)
+plotCor <- rbind(corRural, corUrban)
 
-ggplot(embedPC, aes(x = PC1, y = PC2, color = CMVPos)) +
-  geom_point()
+ComplexHeatmap::Heatmap(plotCor, cluster_rows = FALSE, cluster_columns = FALSE)
 
-#Linear trend for all pathogens
-testTotalNorm_df <- data.frame()
+ggplot(senegaleseData, aes(x = shigellaflexneriTotalNorm, y = `bacteroidesfragilisTotalNorm`, color = Residence)) +
+  geom_point() +
+  stat_cor()
 
-colnames(normTotalEpitope_DF) <- str_replace_all(colnames(normTotalEpitope_DF), "_|:|\\(|\\)|\\.|\\=|\\/|\\||\\,|\\&", "")
+ggplot(senegaleseData, aes(x = shigellaflexneriTotalNorm, y = `agathobacterrectalisTotalNorm`, color = Residence)) +
+  geom_point()+
+  stat_cor()
 
-for(i in colnames(normTotalEpitope_DF)[str_detect(colnames(normTotalEpitope_DF), "TotalNorm")]){
-  plotName <- str_replace_all(i, "TotalNorm", "")
-  
-  featuresTest_lm <- lm(eval(parse(text = i)) ~ Residence, data = normTotalEpitope_DF)
-  
-  featureTest_emm <- emmeans(featuresTest_lm, "Residence")
-  trendOutput <- as.data.frame(contrast(featureTest_emm, "poly"))
-  
-  pairwiseOutput <- as.data.frame(pairs(featureTest_emm))
-  
-  testCurrent_df <- data.frame("pathogen" = i, 
-                               "trendLinear" = subset(trendOutput, contrast == "linear")$p.value,
-                               "trendQuadratic" = subset(trendOutput, contrast == "quadratic")$p.value,
-                               "estimateLinear" = subset(trendOutput, contrast == "quadratic")$estimate)
-  testTotalNorm_df <- rbind(testTotalNorm_df, testCurrent_df)
-  
-}
+ggplot(senegaleseData, aes(x = shigellaflexneriTotalNorm, y = `phocaeicolavulgatusTotalNorm`, color = Residence)) +
+  geom_point()+
+  stat_cor()
 
-testTotalNorm_df$trendLinear <- p.adjust(testTotalNorm_df$trendLinear, method = "BH")
-testTotalNorm_df$trendQuadratic <- p.adjust(testTotalNorm_df$trendQuadratic, method = "BH")
+ggplot(senegaleseData, aes(x = shigellaflexneriTotalNorm, y = `dorealongicatenaTotalNorm`, color = Residence)) +
+  geom_point()+
+  stat_cor()
 
-#Heatmap of presence/absence of significant epitopes
+ggplot(senegaleseData, aes(x = shigellaflexneriTotalNorm, y = shigellasonneiTotalNorm, color = Residence)) +
+  geom_point()+
+  stat_cor(method = "spearman")
+
+ggplot(senegaleseData, aes(x = shigellaflexneriTotalNorm, y = coxsackievirusTotalNorm, color = Residence)) +
+  geom_point()+
+  stat_cor(method = "spearman")
+
+#### Heatmap of presence/absence of significant epitopes ####
 phipSeq_p_raw_df_sig <- phipSeq_p_raw_df[, testSigDF$ID]
 phipSeq_p_raw_df_sig$Residence <- metaData[row.names(phipSeq_p_raw_df_sig), "Residence"]
 phipSeq_p_raw_df_sig$Donor <- row.names(phipSeq_p_raw_df_sig)
@@ -1244,7 +1282,7 @@ heatmapMtx <- t(as.matrix(phipSeq_p_raw_df_sig[, -which(colnames(phipSeq_p_raw_d
 heatmapMtx <- heatmapMtx[, rev(colnames(heatmapMtx))]
 
 library(circlize)
-col_fun <- colorRamp2(c(0, 1), c("black", "red"))
+col_fun <- colorRamp2(c(0, 1), c("#afd8e5", "#ee6550"))
 
 column_ha <- ComplexHeatmap::HeatmapAnnotation(Residence = metaData[colnames(heatmapMtx), "Residence"],
                                col = list(Residence = c("Rural Senegalese" = "#e59f01", "Urban Senegalese" = "#54b3e8", "Urban Dutch" = "#009e72")))
@@ -1257,10 +1295,10 @@ dendrogramCut <- {set.seed(42); cutree(dendrogramRes, k = 4)}
 dendrogramCut <- factor(dendrogramCut, levels = c(4,2,1,3))
 
 #Get selected row names
-selectedRowNames <- c("twist_58790: Genome polyprotein  (Rhinovirus b)", "agilent_12017: Envelope glycoprotein d  (Human herpesvirus 1)",
-                      "agilent_12023: Envelope glycoprotein m  (Human cytomegalovirus)", "agilent_141247: Invasin ipac (Shigella sonnei)",
+selectedRowNames <- c("twist_58790: Genome polyprotein  (Rhinovirus b)", "agilent_12017: Envelope glycoprotein d  (Human herpesvirus 1)", 
+                      "agilent_141247: Invasin ipac (Shigella sonnei)",
                       "agilent_230549: Invasin ipac (Shigella flexneri)", "agilent_219967: Grab (Streptococcus pyogenes)",
-                      "agilent_241538: Invasin ipaa (Shigella flexneri)", "twist_41031: K8.1 (Human gammaherpesvirus 8)",
+                      "twist_41031: K8.1 (Human gammaherpesvirus 8)",
                       "twist_54039: Interspersed repeat antigen (Plasmodium falciparum)", "agilent_237918: Adhesin (Haemophilus influenzae)",
                       "agilent_8991: Epstein-barr nuclear antigen 6 (Epstein-barr virus)", "agilent_2709: Syncytin-1 (Homo sapiens)",
                       "agilent_223729: Iga-specific serine endopeptidase autotransporter (Neisseria meningitidis)")
@@ -1270,20 +1308,36 @@ setdiff(selectedRowNames, row.names(heatmapMtx))
 epitopeIndex_DF <- data.frame("index" = seq(1, nrow(heatmapMtx), 1),
                               row.names = row.names(heatmapMtx))
 
+########### Add Z scores to the left side of the heatmap, that means I can get rid of the barplot
+testDF
+
+rowAnnotation_data <- testDF
+row.names(rowAnnotation_data) <- rowAnnotation_data$ID
+
+rowAnnotation_data <- rowAnnotation_data[str_split_fixed(row.names(heatmapMtx), pattern = "\\: ", n = 2 )[,1],]
+
+#This code plots barplots of Z score
+ha <- ComplexHeatmap::rowAnnotation(numeric = ComplexHeatmap::anno_numeric(rowAnnotation_data$Z,  
+                                          bg_gp = gpar(fill = c("#069e73", "#e5a124"))), 
+                   annotation_name_rot = 0)
+
+#This code plots colours 
+ha <- ComplexHeatmap::rowAnnotation(bar2 = ComplexHeatmap::anno_barplot(rowAnnotation_data$Z * -1))
+
 epitopeAnnotate = ComplexHeatmap::rowAnnotation(foo = ComplexHeatmap::anno_mark(at = epitopeIndex_DF[selectedRowNames,"index"], 
                                    labels = selectedRowNames))
 
-pdf(paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/peptideSig_heatmap_selected.pdf"), height = 18, width = 26)
+pdf(paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/peptideSig_heatmap_selected.pdf"), height = 18, width = 26)
 heatmapPlot <- ComplexHeatmap::Heatmap(heatmapMtx, col = col_fun, 
-                        cluster_rows = TRUE,  row_split = dendrogramCut, cluster_row_slices = FALSE, right_annotation = epitopeAnnotate,
+                        cluster_rows = TRUE,  row_split = dendrogramCut, cluster_row_slices = FALSE, right_annotation = epitopeAnnotate, left_annotation = ha, 
                         cluster_columns = FALSE, top_annotation = column_ha,
-                        height = unit(40, "cm"), width = unit(30, "cm"))
+                        show_row_dend = FALSE)
 ComplexHeatmap::draw(heatmapPlot)
 dev.off()
 
-pdf(paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plots/peptideSig_heatmap.pdf"), height = 18, width = 26)
+pdf(paste0("//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/plotsCell/peptideSig_heatmap.pdf"), height = 18, width = 26)
 heatmapPlot <- ComplexHeatmap::Heatmap(heatmapMtx, col = col_fun, 
-                                       cluster_rows = TRUE,  row_split = dendrogramCut, cluster_row_slices = FALSE,
+                                       cluster_rows = TRUE,  row_split = dendrogramCut, cluster_row_slices = FALSE, left_annotation = ha,
                                        cluster_columns = FALSE, top_annotation = column_ha,
                                        height = unit(40, "cm"), width = unit(30, "cm"))
 ComplexHeatmap::draw(heatmapPlot)
@@ -1301,7 +1355,7 @@ exportEpitopeStats$protein_pathogen <- NULL
 colnames(exportEpitopeStats) <- str_replace_all(colnames(exportEpitopeStats), "Pathogen", "Organism")
 
 write.csv(x = exportEpitopeStats, 
-          file = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/data/cochranArmitage_sig_epitopes.csv")
+          file = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/dataCell//cochranArmitage_sig_epitopes.csv")
 
 exportEpitopeInfo <- peptideInfo
 exportEpitopeInfo$protein_pathogen <- NULL
@@ -1322,595 +1376,38 @@ exportEpitopeInfo$nIndividuals_detected <- nIndividuals[row.names(exportEpitopeI
 colnames(exportEpitopeInfo) <- str_replace_all(colnames(exportEpitopeInfo), "Pathogen", "Organism")
 
 write.csv(x = exportEpitopeInfo, 
-          file = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/data/epitope_information.csv")
+          file = "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/dataCell//epitope_information.csv")
 
+#### Compare different organism results ####
+ruralNormTotal <- subset(normTotalEpitope_DF, Residence == "Rural Senegalese")
+ruralNormTotal <- subset(normTotalEpitope_DF, Residence != "Urban Dutch")
 
-#### Investigate urban, rural and dutch: cochran-armitage test (epitope presence/absence as input) ####
+head(ruralNormTotal)
 
-#Perform Cochran Armitage test to test for trend across Urbanization. Adjust p-value with bonferronni
+#Remove non-useful Info from ruralNormTotal
+ruralNormTotal <- ruralNormTotal[-which(colnames(ruralNormTotal) %in% c("epitopeTotals", "Residence", "Donor", "Sex"))]
 
-phipSeq_p_df$Residence <- metaData[row.names(phipSeq_p_df),"Residence"]
+#Remove columns which have a variance of 0
+ruralNormTotal <- ruralNormTotal[, colVars(ruralNormTotal) != 0]
 
-convertBinary <- reshape2::melt(phipSeq_p_df)
-convertBinary$variable <- as.character(convertBinary$variable)
-convertBinary$Residence <- factor(convertBinary$Residence, levels =  c("Urban Senegalese" , "Rural Senegalese" , "Urban Dutch" ))
+#Remove columns where the pathogens are not in the selected epitope list
+chosenPathogens <- paste(str_replace_all(subsetPeptideInfo$Pathogen, "-| ", ""), collapse = "|")
+ruralNormTotal <- ruralNormTotal[,str_detect(colnames(ruralNormTotal), chosenPathogens)]
 
-testDF <- data.frame()
+combData <- ruralNormTotal
 
-for(i in unique(convertBinary$variable)){
-  current <- subset(convertBinary, variable == i)
-  
-  testResult <- CochranArmitageTest( table(current$Residence, current$value) )
-  
-  testDF <- rbind(testDF, data.frame("ID" = i,
-                                     "p.value" = testResult$p.value,
-                                     "Z" = testResult$statistic))
-  
-}
+head(combData)
 
-#Add meta data
-testDF$Pathogen <- peptideInfo[testDF$ID, "Pathogen"]
-testDF$PathogenComplex <- peptideInfo[testDF$ID, "PathogenComplex"]
-testDF$Protein <- peptideInfo[testDF$ID, "Protein"]
-testDF$protein_pathogen <- peptideInfo[testDF$ID, "protein_pathogen"]
-testDF$aa_seq <- peptideInfo[testDF$ID, "aa_seq"]
+combData$MDS2 <- embedPCoord[row.names(combData),"Axis.2"]
 
-testDF$p.adjust <- p.adjust(testDF$p.value, method = "BH")
+combData <- as.matrix(combData)
 
-testSigDF <- subset(testDF, p.adjust < 0.05)
+#Correlation with shigella flexneri 
+corRes <- cor(combData[,str_detect(colnames(combData), "TotalNorm")])
 
-testSigDF$direction <- "increaseUrbanization"
-testSigDF$direction[testSigDF$Z > 0] <- "decreaseUrbanization"
+sort(corRes[, str_detect(colnames(corRes), "shigellaflexneriTotalNorm")], decreasing = FALSE)[1:5]
+sort(corRes[, str_detect(colnames(corRes), "shigellaflexneriTotalNorm")], decreasing = TRUE)[1:6]
 
-ggplot() + geom_point(aes(x= testDF$Z,y= testDF$p.value))
-
-#write.csv(testDF, "//vf-lucid-r-o.lumcnet.prod.intern/lucid-r-o$/Projects/Senegal_phipseq/data/processed/cochranArmitage_urbanization.csv")
-
-#Investigate organisms
-decreaseWithUrbanization <- table(subset(testSigDF, Z > 0)$Pathogen)
-increaseWithUrbanization <- table(subset(testSigDF, Z < 0)$Pathogen)
-
-#Normalise for how many times an epitope of that organism is present in the dataset
-pathogenTotals <- table(peptideInfo$Pathogen)
-
-decreaseWithUrbanization <- decreaseWithUrbanization / pathogenTotals[names(decreaseWithUrbanization)]
-increaseWithUrbanization <- increaseWithUrbanization / pathogenTotals[names(increaseWithUrbanization)]
-
-wordcloud2(decreaseWithUrbanization, size = 0.4)
-wordcloud2(increaseWithUrbanization, size = 0.8)
-
-#Plot the enrichment of the organisms 
-plotDF <- data.frame("enrichment" = c(as.numeric(decreaseWithUrbanization), as.numeric(increaseWithUrbanization) * -1 ),
-                     "organism" = c(as.character(names(decreaseWithUrbanization)), as.character(names(increaseWithUrbanization)) ),
-                     "direction" = c( rep("Rural Senegalese", length(decreaseWithUrbanization)), rep("Urban Dutch", length(increaseWithUrbanization)) ))
-
-#Order by enrichment score
-plotDF <- plotDF[order(plotDF$enrichment, decreasing = F), ]
-
-plotDF$organism <- factor(plotDF$organism, unique(plotDF$organism))
-
-ggOut <- ggplot(plotDF, aes(x = enrichment, y = organism, fill = direction)) +
-  geom_bar(stat = "identity") +
-  theme_minimal() +
-  xlab("Epitope enrichment Score") +
-  scale_fill_manual(values = area_palette)
-ggOut
-#ggsave(filename = paste0("plots/figure_components/cochranArmitage_enrichment_barplot.pdf"), plot = ggOut)
-
-#Look at the significant results
-phipSeq_p_freq_residence_raw_df$Residence <- row.names(phipSeq_p_freq_residence_raw_df)
-plotDF <- melt(phipSeq_p_freq_residence_raw_df)
-
-plotDF$Residence <- factor(plotDF$Residence, c("Rural Senegalese", "Urban Senegalese", "Urban Dutch") )
-
-#What pathogens have different epitopes present in different groups
-
-#Increasing with urbanization
-ggOut <- ggplot(subset(plotDF, variable %in% subset(testSigDF, Z < 0)$ID), aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~variable) +
-  scale_fill_manual(values = area_palette) +
-  ylim(0, 100)+
-  theme_minimal()
-ggOut
-#ggsave(filename = paste0("plots/figure_components/sup_figures/cochranArmitage_increaseWithUrbanization_epitopePercentPresent.pdf"), plot = ggOut, width = 20, height = 20)
-
-#Decreasing with urbanization
-ggOut <- ggplot(subset(plotDF, variable %in% subset(testSigDF, Z > 0)$ID), aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~variable) +
-  scale_fill_manual(values = area_palette) +
-  ylim(0, 100) +
-  theme_minimal()
-ggOut
-#ggsave(filename = paste0("plots/figure_components/sup_figures/cochranArmitage_decreaseWithUrbanization_epitopePercentPresent.pdf"), plot = ggOut, width = 20, height = 20)
-
-
-#Plot the top three enriched pathogens as the normalised frequencies
-plotDF <- normTotalEpitope_DF[,-which(colnames(normTotalEpitope_DF) == "epitopeTotals")]
-
-top3 <- c("humanherpesvirus1TotalNorm", "shigellasonneiTotalNorm", "shigellaflexneriTotalNorm",
-          "haemophilusinfluenzaeTotalNorm", "epsteinbarrvirusTotalNorm", "rhinovirusbTotalNorm")
-
-plotDF <- melt(plotDF[, c(top3, "Residence")])
-
-plotDF$Residence <- factor(plotDF$Residence, levels = c("Urban Dutch", "Urban Senegalese", "Rural Senegalese"))
-
-ggOut <- ggplot(plotDF, aes(x = value, y = Residence, fill = Residence)) +
-  geom_boxplot() +
-  geom_jitter() +
-  theme_minimal() +
-  facet_wrap(~variable, scales = "free") +
-  scale_fill_manual(values = area_palette) +
-  xlab("Proportion of Ab-OME against organism epitopes") +
-  ylab("")
-ggOut
-#ggsave(filename = paste0("plots/figure_components/top3_enrichment_urbanization_normPathogen.pdf"), plot = ggOut, width = 14)
-
-
-#### Investigate rural, urban and dutch: Specific protein binding differences ####
-
-phipSeq_p_freq_residence_raw_df$Residence <- row.names(phipSeq_p_freq_residence_raw_df)
-plotDF <- melt(phipSeq_p_freq_residence_raw_df)
-
-plotDF$Residence <- factor(plotDF$Residence, rev(c("Rural Senegalese", "Urban Senegalese", "Urban Dutch")) )
-normTotalEpitope_DF$Residence <- factor(normTotalEpitope_DF$Residence, rev(c("Rural Senegalese", "Urban Senegalese", "Urban Dutch")) )
-
-#Plot 6 interesting epitopes that are specific for the different residences
-epitopeIDs <- c("agilent_219967", "agilent_204192", "agilent_104875","agilent_198635",
-                "agilent_214358", "agilent_150541", "twist_37139", "agilent_227745")
-
-epitopeNames <- c("GRAB (<i>S. pyogenes</i>)", "Uncharacterized Protein (<i>P. dorei</i>)", "Bifunctional metallophosphatase/5'-nucleotidase (<i>P. vulgatus</i>)", "Exotoxin 5 (<i>S. aureus</i>)",
-                  "Exported protein (<i>S. aureus</i>)", "Port family protein (<i>P. vulgatus</i>)", "Albumin-binding GA domain-containing protein, partial (<i>S. dysgalactiae</i>)", "Adhesin (<i>H. influenzae</i>)")
-
-names(epitopeNames) <- epitopeIDs
-
-selectedEpitope_plotDF <- subset(plotDF, variable %in% epitopeIDs)
-
-selectedEpitope_plotDF$variable <- as.character(selectedEpitope_plotDF$variable)
-
-selectedEpitope_plotDF$epitopeName <- epitopeNames[selectedEpitope_plotDF$variable]
-
-selectedEpitope_plotDF$epitopeName <- factor(selectedEpitope_plotDF$epitopeName, levels = rev( as.character(epitopeNames) ) )
-
-ggplot(subset(plotDF, variable == "agilent_2709"), aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity")  +
-  scale_fill_manual(values = area_palette) +
-  ylim(0, 100) +
-  theme_minimal()
-
-ggplot(subset(plotDF, variable == "twist_42197"), aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity")  +
-  scale_fill_manual(values = area_palette) +
-  ylim(0, 100) +
-  theme_minimal()
-
-
-ggplot(selectedEpitope_plotDF, aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = area_palette) + 
-  facet_wrap(~epitopeName) +
-  ylim(0, 100) +
-  theme_minimal()
-
-ggOut <- ggplot(selectedEpitope_plotDF, aes(x = value, y = epitopeName, fill = Residence, group = Residence)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  scale_fill_manual(values = area_palette)  +
-  xlim(0, 100) +
-  theme_minimal() +
-  xlab("% of individuals where Ab detected") +
-  ylab("") +
-  theme(axis.text.y = ggtext::element_markdown())
-ggOut
-ggsave(filename = "plots/figure_components/epitopes_across_urbanization_barplot.pdf", plot = ggOut, 
-       width = 11, height = 6)
-
-#Both Strep pyogenes and staph aureus have epitopes that are either increasing or decreasing with urbanization
-
-
-
-ggplot(normTotalEpitope_DF, aes(x= streptococcuspyogenesTotalNorm ,y= Residence, fill = Residence )) +
-          geom_boxplot() +
-          geom_jitter() +
-          scale_fill_manual(values = area_palette) +
-          theme_minimal()+
-  ylab("") +
-  xlab("Proportion of Ab against Streptococcus pyogenes epitopes")
-
-ggplot(normTotalEpitope_DF, aes(x= staphylococcusaureusTotalNorm ,y= Residence, fill = Residence )) +
-  geom_boxplot() +
-  geom_jitter() +
-  scale_fill_manual(values = area_palette) +
-  theme_minimal() +
-  ylab("")+
-  xlab("Proportion of Ab against Staphylococcus aureus epitopes")
-
-
-
-#### Investigate rural, urban and dutch: Shannon index ####
-
-#Get the occurrence of each organism, grouped by Residence
-phipSeq_p_raw_df$Residence <- metaData[row.names(phipSeq_p_raw_df), "Residence"]
-
-organismCounts <- phipSeq_p_raw_df
-
-organismCounts$Donor <- row.names(organismCounts)
-
-organismCounts_melt <- reshape2::melt(organismCounts)
-
-organismCounts_melt$variable <- as.character(organismCounts_melt$variable)
-
-#Add pathogen name
-organismCounts_melt$Pathogen <- peptideInfo[organismCounts_melt$variable,"Pathogen"]
-
-#Calculate pathogen sums for each Residence
-organismCounts_Donor <-  organismCounts_melt %>%
-                    group_by(Donor, Pathogen) %>%
-                    summarise(organismCount_Donor = sum(value))
-organismCounts_Donor <- as.data.frame(organismCounts_Donor)
-
-organismCounts_melt <- organismCounts_melt %>%
-                        group_by(Donor) %>%
-                        summarise(organismCount = sum(value))
-organismCounts_melt <- as.data.frame(organismCounts_melt)
-
-
-row.names(organismCounts_melt) <- organismCounts_melt$Donor
-
-organismCounts_Donor$organismCount <- organismCounts_melt[organismCounts_Donor$Donor, "organismCount"]
-
-#Remove organisms which are present in less than 3 individuals
-organismCounts_Donor <- subset(organismCounts_Donor, organismCount_Donor > 0)
-
-organismCounts_Donor$organismProportions <- organismCounts_Donor$organismCount_Donor / organismCounts_Donor$organismCount 
-
-#Add small pseudocount
-# organismCounts_Donor$organismProportions <- organismCounts_Donor$organismProportions + 0.0000000000000001
-
-shannonDiversity <- organismCounts_Donor %>%
-                          dplyr::group_by(Donor) %>%
-                          summarise(shannonDiv = -sum(organismProportions * log(organismProportions) ))
-
-shannonDiversity$Residence <- metaData[shannonDiversity$Donor, "Residence"]
-shannonDiversity$Residence <- factor(shannonDiversity$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
-
-
-ggplot(shannonDiversity, aes(x = Residence, y = shannonDiv, fill = Residence)) +
-            geom_boxplot() +
-            geom_jitter() +
-            theme_minimal() +
-            scale_fill_manual(values = area_palette)
-
-#Relationship with total epitopes
-shannonDiversity$totalEpitopes <- rowSums(phipSeq_p_raw)[shannonDiversity$Donor]
-
-ggplot(shannonDiversity, aes(x = totalEpitopes, y = shannonDiv, color = Residence)) +
-  geom_point() +
-  theme_minimal() +
-  scale_color_manual(values = area_palette)
-
-ggplot(shannonDiversity, aes(x = Residence, y = totalEpitopes, fill = Residence)) +
-  geom_boxplot() +
-  geom_jitter() +
-  theme_minimal() +
-  scale_fill_manual(values = area_palette)
-
-#### Investigate rural and urban and dutch: microbiome ####
-
-#Bacteriodes and prevotella
-
-normTotalEpitope_microbiome_DF <- data.frame(epitopeTotals = rowSums(phipSeq_p_raw[metaData$ID,]),
-                                  row.names = metaData$ID)
-
-pathogens <- c("^bacteroides|phocaeicola vulgatus", "segatella copri")
-pathogenNames <- c("bacteroides", "prevotella")
-
-for(i in 1:length(pathogens)){
-  
-  peptideInfoCurrent <- peptideInfo[str_detect(peptideInfo$Pathogen, pathogens[i]),]
-  
-  currentEpitopes <- row.names(peptideInfoCurrent)
-  
-  
-  
-  #Add current epitopes bound to data frame
-  if(length(currentEpitopes)==1){
-    currentEpitopesTotals <- phipSeq_p_raw[,currentEpitopes]
-    
-  }
-  
-  
-  else{
-    currentEpitopesTotals <- rowSums(phipSeq_p_raw[,currentEpitopes])
-    
-  }
-
-  
-  normTotalEpitope_microbiome_DF[[paste0(pathogenNames[i], "TotalNorm")]] <- currentEpitopesTotals[row.names(normTotalEpitope_microbiome_DF)] / normTotalEpitope_microbiome_DF$epitopeTotals
-  
-}
-
-normTotalEpitope_microbiome_DF$Residence <- metaData[row.names(normTotalEpitope_microbiome_DF), "Residence"]
-normTotalEpitope_microbiome_DF$Residence <- factor(normTotalEpitope_microbiome_DF$Residence, levels = c("Rural Senegalese", "Urban Senegalese", "Urban Dutch"))
-normTotalEpitope_microbiome_DF$Donor <- row.names(normTotalEpitope_microbiome_DF)
-normTotalEpitope_microbiome_DF$Sex <- metaData[row.names(normTotalEpitope_microbiome_DF), "Sex"]
-
-ggplot(normTotalEpitope_microbiome_DF, aes(x = bacteroidesTotalNorm, y = Residence, fill = Residence)) +
-          geom_boxplot() +
-          geom_jitter() + 
-          theme_minimal() +
-          scale_fill_manual(values = area_palette)
-
-ggplot(normTotalEpitope_microbiome_DF, aes(x = prevotellaTotalNorm, y = Residence, fill = Residence)) +
-  geom_boxplot() +
-  geom_jitter() + 
-  theme_minimal() +
-  scale_fill_manual(values = area_palette)
-
-test_normTotal <- normTotalEpitope_DF
-test_normTotal <- test_normTotal[,str_detect(colnames(test_normTotal), "TotalNorm")]
-
-rowSums(test_normTotal)
-
-#### Investigate Rural and urban senegalese differences ####
-
-metaData_complex_senegal <- subset(metaData_complex, Residence != "Urban Dutch")
-
-table(metaData_complex_senegal$Residence, metaData_complex_senegal$job_amalgam)
-table(metaData_complex_senegal$Sex, metaData_complex_senegal$job_amalgam)
-
-phipSeq_p_senegal <- phipSeq_p_raw[senegalIndividuals,names(epitopeByResidenceSenegal) ]
-
-#Remove columns where everyone has the antibody
-phipSeq_p_senegal <- phipSeq_p_senegal[,colSums(phipSeq_p_senegal) != nrow(phipSeq_p_senegal)]
-
-# #Remove people whose working/job environment is not indoors or outdoors
-# phipSeq_p_senegal <- phipSeq_p_senegal[subset(metaData_complex_senegal, job_amalgam %in% c("indoor", "outdoor") )$ID ,]
-
-PCA_phip <- prcomp(phipSeq_p_senegal, scale = TRUE, center = TRUE)
-
-fviz_pca_ind(PCA_phip)
-
-embedPC <- as.data.frame(PCA_phip$x)
-embedPC$Residence <- as.character(metaData[row.names(embedPC), "Residence"])
-embedPC$sampleID <- row.names(embedPC)
-embedPC$Sex <- metaData[row.names(embedPC), "Sex"]
-embedPC$Age <- metaData[row.names(embedPC), "Age"]
-embedPC$job_amalgam <- metaData_complex[row.names(embedPC), "job_amalgam"]
-embedPC$Residence_complex <- metaData_complex[row.names(embedPC), "Cur_Res_G"]
-
-
-ggplot(embedPC, aes(x = PC1, y = PC2, color = Residence)) +
-  geom_point(size = 2) +
-  theme_minimal() +
-  scale_color_manual(values = area_palette)
-
-#Get variance explained
-PC1_varExplained <- (PCA_phip$sdev[1]^2 / sum(PCA_phip$sdev^2)) * 100
-PC2_varExplained <- (PCA_phip$sdev[2]^2 / sum(PCA_phip$sdev^2)) * 100
-PC10_varExplained <- (PCA_phip$sdev[10]^2 / sum(PCA_phip$sdev^2)) * 100
-
-embedPC$Residence <- factor(embedPC$Residence, levels = c("Rural Senegalese", "Urban Senegalese"))
-
-#PCA plot coloured by Area
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Residence,embedPC,mean),by="Residence")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=Residence))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Residence)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Residence), size=5, shape = 21) +
-  theme_minimal()+
-  scale_fill_manual(values = area_palette) +
-  scale_color_manual(values = area_palette)+
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)"))
-ggOut
-ggsave(filename = "plots/figure_components/PC1PC2Plot_senegal_filteredData_residenceColour.pdf", plot = ggOut, 
-       width = 9, height = 8)
-
-#PCA plot coloured by job_amalgam
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~job_amalgam,embedPC,mean),by="job_amalgam")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=job_amalgam))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = job_amalgam)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=job_amalgam), size=5, shape = 21) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)"))
-ggOut
-
-#PCA plot coloured by Sex
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Sex,embedPC,mean),by="Sex")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=Sex))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Sex)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Sex), size=5, shape = 21) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)"))
-ggOut
-
-#PCA plot coloured by residence, split by job_amalgam
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Residence,embedPC,mean),by="Residence")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=Residence))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Residence)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Residence), size=5, shape = 21) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)")) +
-  facet_wrap(~job_amalgam)+
-  scale_fill_manual(values = area_palette) +
-  scale_color_manual(values = area_palette)
-ggOut
-
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Residence,embedPC,mean),by="Residence")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=Sex))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Residence)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Residence), size=5, shape = 21) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)")) +
-  facet_wrap(~job_amalgam)+
-  scale_fill_manual(values = area_palette) +
-  scale_color_manual(values = append(area_palette, c("M" = "red", "F" = "blue")))
-ggOut
-
-gg <- merge(embedPC,aggregate(cbind(mean.PC1=PC1,mean.PC2=PC2)~Residence_complex,embedPC,mean),by="Residence_complex")
-ggOut <- ggplot(gg, aes(PC1,PC2))+
-  geom_hline(yintercept = 0)+
-  geom_vline(xintercept = 0) +
-  geom_point(size=3, aes(color=Sex))+
-  geom_segment(aes(x=mean.PC1, y=mean.PC2, xend=PC1, yend=PC2, color = Residence_complex)) +
-  geom_point(aes(x=mean.PC1,y=mean.PC2, fill=Residence_complex), size=5, shape = 21) +
-  theme_minimal() +
-  xlab(paste0("PC1 (", round(PC1_varExplained, digits = 2), "%)"))+
-  ylab(paste0("PC2 (", round(PC2_varExplained, digits = 2), "%)")) +
-  facet_wrap(~job_amalgam)+
-  scale_fill_manual(values = areaComplex_palette) +
-  scale_color_manual(values = append(areaComplex_palette, c("M" = "red", "F" = "blue")))
-ggOut
-
-#Perform chi-sq test to compare epitopes between rural and urban senegalese
-
-phipSeq_p_senegal_df <- as.data.frame(phipSeq_p_senegal)
-
-#Remove columns where everyone has the antibody
-
-phipSeq_p_senegal_df$Residence <- metaData[row.names(phipSeq_p_senegal_df),"Residence"]
-
-convertBinary <- reshape2::melt(phipSeq_p_senegal_df)
-convertBinary$variable <- as.character(convertBinary$variable)
-convertBinary$Residence <- factor(convertBinary$Residence, levels =  c("Rural Senegalese" , "Urban Senegalese"))
-
-fishersDF <- data.frame()
-
-for(i in unique(convertBinary$variable)){
-  current <- subset(convertBinary, variable == i)
-  
-  testResult <- fisher.test( table(current$Residence, current$value) )
-  
-  fishersDF <- rbind(fishersDF, data.frame("ID" = i,
-                                           "p.value" = testResult$p.value,
-                                           "Z" = testResult$estimate))
-  
-}
-
-#Add meta data
-fishersDF$Pathogen <- peptideInfo[fishersDF$ID, "Pathogen"]
-fishersDF$PathogenComplex <- peptideInfo[fishersDF$ID, "PathogenComplex"]
-fishersDF$Protein <- peptideInfo[fishersDF$ID, "Protein"]
-
-fishersDF$p.adjust <- p.adjust(fishersDF$p.value, method = "BH")
-
-fishersSigDF <- subset(fishersDF, p.adjust < 0.05)
-fishersSigDF <- subset(fishersDF, p.value < 0.05)
-
-ggplot() + geom_point(aes(x= fishersDF$Z,y= fishersDF$p.value)) +
-  geom_vline(xintercept = median(fishersDF$Z))
-
-freqPercent <- as.data.frame(t(phipSeq_p_freq_residence_df[c("Rural Senegalese" , "Urban Senegalese"),fishersSigDF$ID]))
-freqPercent$ResidenceDiff <- freqPercent$`Rural Senegalese` - freqPercent$`Urban Senegalese`
-
-ruralEpitopes <- table(peptideInfo[row.names(subset(freqPercent, ResidenceDiff > 0)), "Pathogen"])
-urbanEpitopes <- table(peptideInfo[row.names(subset(freqPercent, ResidenceDiff < 0)), "Pathogen"])
-
-#Normalise for how many times an epitope of that organism is present in the dataset
-pathogenTotals <- table(peptideInfo$Pathogen)
-
-ruralEpitopes <- ruralEpitopes / pathogenTotals[names(ruralEpitopes)]
-urbanEpitopes <- urbanEpitopes / pathogenTotals[names(urbanEpitopes)]
-
-wordcloud2(ruralEpitopes, size = 0.6)
-wordcloud2(urbanEpitopes, size = 0.8)
-
-#Look at the significant results
-phipSeq_p_freq_residence_df$Residence <- row.names(phipSeq_p_freq_residence_df)
-plotDF <- melt(phipSeq_p_freq_residence_df[c("Rural Senegalese" , "Urban Senegalese"),c(row.names(subset(freqPercent, ResidenceDiff > 0)), "Residence")] )
-plotDF$Residence <- factor(plotDF$Residence, c("Rural Senegalese", "Urban Senegalese") )
-
-#What pathogens have different epitopes present in different groups
-ggplot(plotDF, aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~variable) +
-  scale_fill_manual(values = area_palette) +
-  ylim(0, 100)
-
-plotDF <- melt(phipSeq_p_freq_residence_df[c("Rural Senegalese" , "Urban Senegalese"),c(row.names(subset(freqPercent, ResidenceDiff < 0)), "Residence")] )
-plotDF$Residence <- factor(plotDF$Residence, c("Rural Senegalese", "Urban Senegalese") )
-
-#What pathogens have different epitopes present in different groups
-ggplot(plotDF, aes(x = Residence, y = value, fill = Residence)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~variable) +
-  scale_fill_manual(values = area_palette) +
-  ylim(0, 100)
-
-#### Predict Rural vs urban senegalese ####
-
-
-
-
-
-
-
-library(randomForest)
-library(caret)
-
-x <- phipSeq_p_senegal_df
-
-#Add current residence area
-x$currentResidence <- metaData_complex_senegal[, ""]
-
-x$Residence <- factor(x$Residence)
-
-{set.seed(42); trainTest <- sample(2, nrow(x), replace = TRUE, prob = c(0.7, 0.3)) }
-
-train <- x[trainTest==1,]
-test <- x[trainTest==2,]
-
-#Random forest
-rfResults <- randomForest(Residence~., data=train)
-
-print(rfResults)
-
-predictions_test_rf <- as.data.frame(predict(rfResults, test, type = "prob"))
-
-predictions_train_rf <- as.data.frame(predict(rfResults, type = "prob"))
-
-rf.roc<-pROC::roc(test$Residence,predictions_test[,2])
-plot(rf.roc)
-
-#Logisitic regression
-
-lrResults <- glm(Residence ~.,family=binomial(link='logit'),data=train)
-
-predictions_test_lr <- as.data.frame(predict(lrResults, test,type='response'))
-predictions_test_lr <- ifelse(predictions_test_lr > 0.5,1,0)
-
-misClasificError <- mean(predictions_test_lr != test$Residence)
-
-#Decision tree
-
-library(partykit)
-
-dtResults <- ctree(Residence ~., 
-            data=train)
-plot(dtResults)
-
-table(predict(dtResults), train$Residence)
-
-predictions_test_dt <- predict(dtResults, newdata = test, type = "prob")
-
-
+ggplot(combData, aes(x = shigellaflexneriTotalNorm, y = `phocaeicolavulgatusTotalNorm`)) +
+  geom_point()
 
