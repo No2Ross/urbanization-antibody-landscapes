@@ -328,9 +328,6 @@ peptideInfo[twistDF$ID,"BLAST"] <- "Yes"
 
 #### other ####
 
-#Lots of the uni_ref names are incorrect. For example it classified haemophilus influenza protein as "Bacteria"
-#The proteins however are probably correct
-
 #Also, some epitopes don't have any information (in full.name, corona or uniref)
 
 #Extract the epitopes which don't have protein or pathogen information and are not corona or twist peptide list IDs.
@@ -424,7 +421,7 @@ for(i in list.files("BLAST/output/", pattern = "other")){
       if(length(currentEpitope) < 15){currentEpitope <- currentEpitope[1:length(currentEpitope)]}
       else{currentEpitope <- currentEpitope[1:15]}
       
-      #Iterate through the different options and clean the
+      #Iterate through the different options and clean them
       for(choiceOption in 1:length(currentEpitope)){
         
         currentHit <- currentEpitope[choiceOption]
@@ -502,6 +499,12 @@ unique_pathogens <- names(table(peptideInfo$Pathogen))
 
 #Define simple groups
 
+#Some are defined as "unclassified" or "uncultured" followed by pathogen name. Remove these prefixes
+peptideInfo$Pathogen <- str_replace_all(peptideInfo$Pathogen, "unclassified |uncultured ", "")
+
+#Mammalian
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^mn")] <- "homo sapiens"
+
 #Virus
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^influenza a virus")] <- "influenza a virus"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^influenza b virus")] <- "influenza b virus"
@@ -516,17 +519,37 @@ peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^rhinovirus b")] <- "rhino
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^poliovirus")] <- "poliovirus"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^enterovirus")] <- "enterovirus"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human herpesvirus 1")] <- "human herpesvirus 1"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^rousettus bat coronavirus")] <- "rousettus bat coronavirus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^murine hepatitis virus")] <- "murine hepatitis virus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^middle east respiratory")] <- "middle east respiratory syndrome-related coronavirus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^sars coronavirus")] <- "sars coronavirus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human coronavirus")] <- "human coronavirus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^foot-and-mouth disease virus")] <- "foot-and-mouth disease virus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human poliovirus 1 mahoney")] <- "poliovirus 1"
 
-#Human gamma herpesvirus 4 is EBV
+
+
+#Human gamma herpesvirus 4 and human herpesvirus 4 is EBV
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^epstein-barr virus")] <- "epstein-barr virus"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human gammaherpesvirus 4")] <- "epstein-barr virus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human herpesvirus 4")] <- "epstein-barr virus"
 
 #human herpesvirus 5/Human betaherpesvirus 5 is CMV
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human herpesvirus 5")] <- "human cytomegalovirus"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human betaherpesvirus 5")] <- "human cytomegalovirus"
 
-#Human alphaherpesvirus 1 is human herpesvirus 1
+#Human alphaherpesvirus 1 and is human herpesvirus 1
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human alphaherpesvirus 1")] <- "human herpesvirus 1"
+
+#human herpesvirus 8 is human gammaherpesvirus 8
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human herpesvirus 8")] <- "human gammaherpesvirus 8"
+
+#human alphaherpesvirus 2 is human herpesvirus 2
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human alphaherpesvirus 2")] <- "human herpesvirus 2"
+
+#human alphaherpesvirus 3 is human herpesvirus 3
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^human alphaherpesvirus 3")] <- "human herpesvirus 3"
+
 
 #Bacteria
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^mycobacterium tuberculosis")] <- "mycobacterium tuberculosis"
@@ -569,10 +592,34 @@ peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^firmicutes bacterium")] <
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^mediterraneibacter gnavus")] <- "mediterraneibacter gnavus"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^muribaculaceae bacterium")] <- "muribaculaceae bacterium"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^subdoligranulum sp\\.")] <- "subdoligranulum sp."
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^ruminiclostridium sp\\.")] <- "ruminiclostridium sp."
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^blautia")] <- "blautia sp."
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^bacillus thuringiensis")] <- "bacillus thuringiensis"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^alistipes")] <- "alistipes sp."
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^streptococcus infantarius")] <- "streptococcus infantarius"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^ruminococcus callidus")] <- "ruminococcus callidus"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^ruminococcaceae bacterium")] <- "ruminococcaceae bacterium"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^clostridia bacterium")] <- "clostridia bacterium"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^butyricicoccus sp")] <- "butyricicoccus sp."
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^bifidobacterium longum")] <- "bifidobacterium longum"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^bacteroidales bacterium")] <- "bacteroidales bacterium"
+
+#Some bacteria have the name "x" or "x sp.", change to be "x sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "mycobacterium"] <- "mycobacterium sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "phocaeicola"] <- "phocaeicola sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "ruminococcus"] <- "ruminococcus sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "akkermansia"] <- "akkermansia sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "anaerostipes"] <- "anaerostipes sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "bifidobacterium"] <- "bifidobacterium sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "clostridium"] <- "clostridium sp."
+#Colstridium is missing the dot at the end of sp.
+peptideInfo$Pathogen[peptideInfo$Pathogen == "clostridium sp"] <- "clostridium sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "collinsella"] <- "collinsella sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "faecalibacterium"] <- "faecalibacterium sp."
+peptideInfo$Pathogen[peptideInfo$Pathogen == "streptococcus"] <- "streptococcus sp."
 
 #prevotella copri is now called segatella copri
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^prevotella copri")] <- "segatella copri"
-
 
 #Parasite
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^toxoplasma gondii")] <- "toxoplasma gondii"
@@ -619,10 +666,22 @@ peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^phocaeicola vulgatus")] <
 
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^enterococcus faecalis")] <- "enterococcus faecalis"
 
+#Fungi
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^candida albicans")] <- "candida albicans"
+
+#Encoding of SARS-CoV2 results were not properly extracted. They are simplified here
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^pdb|6m3m|d chain d, sars-cov-2 nucleocapsid protein")] <- "severe acute respiratory syndrome coronavirus 2"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^pdb|6vsb|c chain c, sars-cov-2 spike glycoprotein")] <- "severe acute respiratory syndrome coronavirus 2"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^pdb|6vxx|c chain c, sars-cov-2 spike glycoprotein")] <- "severe acute respiratory syndrome coronavirus 2"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^pdb|6vyb|c chain c, sars-cov-2 spike glycoprotein")] <- "severe acute respiratory syndrome coronavirus 2"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^pdb|6w75|c chain c, sars-cov-2 nsp16")] <- "severe acute respiratory syndrome coronavirus 2"
 
 #Phage
+#There are a variety of phage subtypes. For simplicity, we combine them together
+
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^lactobacillus phage")] <- "lactobacillus phage"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^lactococcus phage")] <- "lactococcus phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^lactococcus lactis phage")] <- "lactococcus phage"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^enterococcus phage")] <- "enterococcus phage"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^enterobacteria phage")] <- "enterobacteria phage"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^clostridium phage")] <- "clostridium phage"
@@ -632,8 +691,16 @@ peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^shigella phage")] <- "shi
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^salmonella phage")] <- "salmonella phage"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^klebsiella phage")] <- "klebsiella phage"
 peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^escherichia phage")] <- "escherichia phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^listeria phage")] <- "listeria phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^streptococcus phage")] <- "streptococcus phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^enterobacter phage")] <- "enterobacter phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^bacillus phage")] <- "bacillus phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^proteus phage")] <- "proteus phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^pseudomonas phage")] <- "pseudomonas phage"
+peptideInfo$Pathogen[str_detect(peptideInfo$Pathogen,"^lactoccocus phage")] <- "lactococcus phage"
 
 unique_pathogensPost <- names(table(peptideInfo$Pathogen))
+unique_pathogensPost
 
 #If Protein_uniref values exists, make the Protein column equal to Protein_uniref
 peptideInfo$Protein[which(peptideInfo$Protein_uniref != "")] <- peptideInfo$Protein_uniref[which(peptideInfo$Protein_uniref != "")]
@@ -641,14 +708,33 @@ peptideInfo$Protein[which(peptideInfo$Protein_uniref != "")] <- peptideInfo$Prot
 #Convert protein names to lower case
 peptideInfo$Protein <- tolower(peptideInfo$Protein)
 
+#Some rhinovirus epitopes have been classified as "human rhinovirus sp."
+#As Ab against rhinovirus are quite common in the populations under investigation, I have manually looked
+#up the epitopes and assigned them to either rhinovirus A, B or C
+peptideInfo$Pathogen[peptideInfo$Pathogen == "human rhinovirus sp." & 
+                       peptideInfo$aa_seq == "MGAQVSRQNVGTHSTQNSVSNGSSLNYFNINYFKDAASSGASRLDFSQDPSKFTDPVKDVLEKG "] <- "rhinovirus a"
+
+peptideInfo$Pathogen[peptideInfo$Pathogen == "human rhinovirus sp." & 
+                       peptideInfo$aa_seq == "IHVQCNATKFHSGCLLVVVIPEHQLASHEGGTVSVKYKYTHPGDRGIDLDTVEVAGGPTSDAIY "] <- "rhinovirus b"
+
+peptideInfo$Pathogen[peptideInfo$Pathogen == "human rhinovirus sp." & 
+                       peptideInfo$aa_seq == "MGAQVSTQKSGSHENQNILTNGSNQTFTVINYYKDAASSSSAGQSFSMDPSKFTEPVKDLMLKG "] <- "rhinovirus b"
+
+peptideInfo$Pathogen[peptideInfo$Pathogen == "human rhinovirus sp." & 
+                       peptideInfo$aa_seq == "DAASSGASRLDFSQDPSKFTDPVKDVLEKGIPTLQSPTVEACGYSDRLIQITRG "] <- "rhinovirus a"
+
+peptideInfo$Pathogen[peptideInfo$Pathogen == "human rhinovirus sp." & 
+                       peptideInfo$aa_seq == "MGAQVSRQNVGTHSTQNSVSNGSSLNYFNINYFKDAASSGASRLDFSQDPSKFTDPVKDVLEKG "] <- "rhinovirus a"
+
+pathogenNamesDF <- data.frame(ID = seq(1, length(unique(peptideInfo$Pathogen))),
+                              pathogen = unique(peptideInfo$Pathogen))
+
 #### Save peptideInfo ####
 peptideInfo[,"epitopeGroup"] <- paste0(peptideInfo$Protein, "_", peptideInfo$Pathogen)
 peptideInfo[,"epitopeUnique"] <- paste0(peptideInfo$Protein, "_", peptideInfo$Pathogen, "_", row.names(peptideInfo))
 
-#For ease of analysis, remove all spaces and punctuation 
 
 write.csv(peptideInfo, "PhIPseq_peptideInfo_processed_BLAST.csv")
-
 
 
 #### outtakes ####
